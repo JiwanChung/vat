@@ -1,0 +1,10 @@
+project = "Vat"
+version = 1
+active = true
+
+[metadata]
+tags = ["tui", "rust", "viewer"]
+
+[metadata.stats]
+files = 12
+stars = 1200

@@ -1,0 +1,8 @@
+:root {
+  --brand: #ff6b35;
+}
+
+.card {
+  background: rgb(240, 240, 240);
+  border: 1px solid #111111;
+}

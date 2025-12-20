@@ -1,0 +1,5 @@
+app "Vat" active=true version=1 {
+  metadata tags="tui" tags="rust" tags="viewer" {
+    stats files=12 stars=1200
+  }
+}
