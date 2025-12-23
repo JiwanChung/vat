@@ -98,8 +98,17 @@ impl ArchiveEngine {
 
                 let mut spans = Vec::new();
 
+                // Row number (dimmed)
+                let row_num = format!("{:>4} ", row + 1);
+                let row_style = if selected {
+                    Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                spans.push(Span::styled(row_num, row_style));
+
                 // Icon
-                let icon = if entry.is_dir { "D " } else { "  " };
+                let icon = if entry.is_dir { "📁 " } else { "  " };
                 let icon_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
                 } else {
@@ -112,7 +121,7 @@ impl ArchiveEngine {
                 let size_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::Magenta)
                 };
                 spans.push(Span::styled(format!("{:>8} ", size_str), size_style));
 
@@ -123,10 +132,17 @@ impl ArchiveEngine {
                     } else {
                         100
                     };
+                    let ratio_color = if ratio < 50 {
+                        Color::Green
+                    } else if ratio < 80 {
+                        Color::Yellow
+                    } else {
+                        Color::DarkGray
+                    };
                     let ratio_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(ratio_color)
                     };
                     spans.push(Span::styled(format!("{:>3}% ", ratio), ratio_style));
                 } else {
@@ -137,9 +153,16 @@ impl ArchiveEngine {
                 let path_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
                 } else if entry.is_dir {
-                    Style::default().fg(Color::LightCyan).bold()
+                    Style::default().fg(Color::Cyan).bold()
                 } else {
-                    Style::default().fg(Color::White)
+                    // Color by extension
+                    let ext = entry.path.split('.').last().unwrap_or("");
+                    match ext {
+                        "rs" | "py" | "js" | "ts" | "go" | "java" | "c" | "cpp" | "h" => Style::default().fg(Color::Green),
+                        "json" | "yaml" | "yml" | "toml" | "xml" => Style::default().fg(Color::Yellow),
+                        "md" | "txt" | "rst" => Style::default().fg(Color::White),
+                        _ => Style::default().fg(Color::White)
+                    }
                 };
                 spans.push(Span::styled(&entry.path, path_style));
 
@@ -288,11 +311,11 @@ impl ArchiveEngine {
         self.entries
             .iter()
             .map(|entry| {
-                let icon = if entry.is_dir { "D" } else { " " };
+                let icon = if entry.is_dir { "📁" } else { " " };
                 let size = format_size(entry.size);
                 Line::from(vec![
                     Span::styled(icon.to_string(), Style::default().fg(Color::Cyan)),
-                    Span::styled(format!(" {:>8} ", size), Style::default().fg(Color::LightYellow)),
+                    Span::styled(format!(" {:>8} ", size), Style::default().fg(Color::Magenta)),
                     Span::styled(entry.path.clone(), Style::default().fg(Color::White)),
                 ])
             })

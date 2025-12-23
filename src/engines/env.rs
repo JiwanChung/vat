@@ -93,20 +93,30 @@ impl EnvEngine {
                 truncate(&entry.value, 50)
             };
 
+            // Smart value coloring
             let value_style = if entry.is_secret {
-                Style::default().fg(Color::LightRed)
+                Style::default().fg(Color::Red)
             } else {
-                Style::default().fg(Color::LightGreen)
+                let v = entry.value.to_lowercase();
+                if v == "true" || v == "false" || v == "yes" || v == "no" {
+                    Style::default().fg(Color::Cyan)
+                } else if entry.value.parse::<f64>().is_ok() {
+                    Style::default().fg(Color::Magenta)
+                } else if entry.value.starts_with('/') || entry.value.contains("://") {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::Yellow)
+                }
             };
 
             let cells = vec![
                 Cell::from(entry.line_no.to_string())
-                    .style(Style::default().fg(Color::LightYellow)),
-                Cell::from("│").style(Style::default().fg(Color::LightBlue)),
+                    .style(Style::default().fg(Color::DarkGray)),
+                Cell::from("│").style(Style::default().fg(Color::DarkGray)),
                 Cell::from(entry.category.clone())
-                    .style(Style::default().fg(Color::LightMagenta)),
+                    .style(Style::default().fg(Color::Magenta)),
                 Cell::from(entry.key.clone())
-                    .style(Style::default().fg(Color::LightCyan).bold()),
+                    .style(Style::default().fg(Color::White).bold()),
                 Cell::from(display_value).style(value_style),
             ];
             rows.push(Row::new(cells));

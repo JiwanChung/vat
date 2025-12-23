@@ -90,14 +90,14 @@ impl LockEngine {
             let mut cells = Vec::new();
             cells.push(
                 Cell::from((self.scroll + idx + 1).to_string())
-                    .style(Style::default().fg(Color::LightYellow)),
+                    .style(Style::default().fg(Color::DarkGray)),
             );
-            cells.push(Cell::from("│").style(Style::default().fg(Color::LightBlue)));
-            cells.push(Cell::from(truncate(&entry.name, 22)).style(Style::default().fg(Color::LightGreen)));
-            cells.push(Cell::from(truncate(&entry.version, 12)).style(Style::default().fg(Color::LightCyan)));
-            cells.push(Cell::from(truncate(&entry.source, 28)).style(Style::default().fg(Color::LightCyan)));
-            cells.push(Cell::from(truncate(&entry.checksum, 16)).style(Style::default().fg(Color::LightMagenta)));
-            cells.push(Cell::from(truncate(&entry.dependencies.join(", "), 40)).style(Style::default().fg(Color::White)));
+            cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
+            cells.push(Cell::from(truncate(&entry.name, 22)).style(Style::default().fg(Color::Cyan).bold()));
+            cells.push(Cell::from(truncate(&entry.version, 12)).style(Style::default().fg(Color::Magenta)));
+            cells.push(Cell::from(truncate(&entry.source, 28)).style(Style::default().fg(Color::Green)));
+            cells.push(Cell::from(truncate(&entry.checksum, 16)).style(Style::default().fg(Color::DarkGray)));
+            cells.push(Cell::from(truncate(&entry.dependencies.join(", "), 40)).style(Style::default().fg(Color::Yellow)));
             rows.push(Row::new(cells));
         }
 
@@ -256,13 +256,13 @@ impl LockEngine {
         lines.push(Line::from(join_with_sep(headers, "  ")));
         for (idx, entry) in self.entries.iter().enumerate() {
             let spans = vec![
-                Span::styled((idx + 1).to_string(), Style::default().fg(Color::LightYellow)),
-                Span::styled("│", Style::default().fg(Color::LightBlue)),
-                Span::styled(entry.name.clone(), Style::default().fg(Color::White)),
-                Span::styled(entry.version.clone(), Style::default().fg(Color::LightCyan)),
-                Span::styled(entry.source.clone(), Style::default().fg(Color::LightCyan)),
-                Span::styled(entry.checksum.clone(), Style::default().fg(Color::LightCyan)),
-                Span::styled(entry.dependencies.join(", "), Style::default().fg(Color::White)),
+                Span::styled((idx + 1).to_string(), Style::default().fg(Color::DarkGray)),
+                Span::styled("│", Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.name.clone(), Style::default().fg(Color::Cyan).bold()),
+                Span::styled(entry.version.clone(), Style::default().fg(Color::Magenta)),
+                Span::styled(entry.source.clone(), Style::default().fg(Color::Green)),
+                Span::styled(entry.checksum.clone(), Style::default().fg(Color::DarkGray)),
+                Span::styled(entry.dependencies.join(", "), Style::default().fg(Color::Yellow)),
             ];
             lines.push(Line::from(join_with_sep(spans, "  ")));
         }

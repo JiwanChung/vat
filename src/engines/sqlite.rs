@@ -136,14 +136,34 @@ impl SqliteEngine {
                     Style::default().fg(Color::White)
                 };
 
-                let pk_marker = if col.is_pk { " PK" } else { "" };
+                let pk_marker = if col.is_pk { " 🔑" } else { "" };
                 let null_marker = if col.nullable { "" } else { " NOT NULL" };
+
+                // Color type based on SQL data type
+                let type_style = if selected {
+                    Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else {
+                    let upper = col.col_type.to_uppercase();
+                    if upper.contains("INT") || upper.contains("REAL") || upper.contains("NUMERIC") || upper.contains("FLOAT") || upper.contains("DOUBLE") {
+                        Style::default().fg(Color::Magenta)
+                    } else if upper.contains("TEXT") || upper.contains("CHAR") || upper.contains("VARCHAR") {
+                        Style::default().fg(Color::Yellow)
+                    } else if upper.contains("BOOL") {
+                        Style::default().fg(Color::Cyan)
+                    } else if upper.contains("DATE") || upper.contains("TIME") {
+                        Style::default().fg(Color::Green)
+                    } else if upper.contains("BLOB") {
+                        Style::default().fg(Color::DarkGray)
+                    } else {
+                        Style::default().fg(Color::White)
+                    }
+                };
 
                 display_lines.push((selected, Line::from(vec![
                     Span::raw("  "),
                     Span::styled(&col.name, col_style),
-                    Span::styled(format!(" {}", col.col_type), Style::default().fg(Color::LightYellow)),
-                    Span::styled(pk_marker, Style::default().fg(Color::Magenta)),
+                    Span::styled(format!(" {}", col.col_type), type_style),
+                    Span::styled(pk_marker, Style::default().fg(Color::Yellow)),
                     Span::styled(null_marker, Style::default().fg(Color::DarkGray)),
                 ])));
                 line_idx += 1;
@@ -200,10 +220,25 @@ impl SqliteEngine {
             .iter()
             .skip(self.scroll)
             .take(height)
-            .map(|row| {
+            .enumerate()
+            .map(|(_, row)| {
                 let cells: Vec<Cell> = row
                     .iter()
-                    .map(|v| Cell::from(truncate(v, 30)).style(Style::default().fg(Color::White)))
+                    .map(|v| {
+                        // Color by value type
+                        let style = if v == "NULL" {
+                            Style::default().fg(Color::DarkGray)
+                        } else if v == "[BLOB]" {
+                            Style::default().fg(Color::DarkGray).italic()
+                        } else if v.parse::<f64>().is_ok() {
+                            Style::default().fg(Color::Magenta)
+                        } else if v == "true" || v == "false" || v == "1" || v == "0" {
+                            Style::default().fg(Color::Cyan)
+                        } else {
+                            Style::default().fg(Color::Yellow)
+                        };
+                        Cell::from(truncate(v, 30)).style(style)
+                    })
                     .collect();
                 Row::new(cells)
             })
@@ -454,11 +489,12 @@ impl SqliteEngine {
             ]));
 
             for col in &table.columns {
-                let pk = if col.is_pk { " PK" } else { "" };
+                let pk = if col.is_pk { " 🔑" } else { "" };
                 lines.push(Line::from(vec![
                     Span::raw("  "),
                     Span::styled(col.name.clone(), Style::default().fg(Color::White)),
-                    Span::styled(format!(" {}{}", col.col_type, pk), Style::default().fg(Color::LightYellow)),
+                    Span::styled(format!(" {}", col.col_type), Style::default().fg(Color::Magenta)),
+                    Span::styled(pk, Style::default().fg(Color::Yellow)),
                 ]));
             }
 

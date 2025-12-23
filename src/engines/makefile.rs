@@ -84,28 +84,28 @@ impl MakefileEngine {
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::DarkGray)
                 };
                 spans.push(Span::styled(line_no_str, line_no_style));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 match parsed {
                     MakeLine::Target { name, deps, is_phony } => {
                         if *is_phony {
-                            spans.push(Span::styled("[P] ", Style::default().fg(Color::Magenta)));
+                            spans.push(Span::styled("◆ ", Style::default().fg(Color::Magenta)));
                         }
                         let name_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightGreen).bold()
+                            Style::default().fg(Color::Cyan).bold()
                         };
                         spans.push(Span::styled(name.clone(), name_style));
-                        spans.push(Span::styled(":", Style::default().fg(Color::White)));
+                        spans.push(Span::styled(":", Style::default().fg(Color::DarkGray)));
                         if !deps.is_empty() {
                             let dep_style = if selected {
                                 Style::default().fg(Color::Black).bg(Color::LightBlue)
                             } else {
-                                Style::default().fg(Color::LightCyan)
+                                Style::default().fg(Color::Green)
                             };
                             spans.push(Span::styled(format!(" {}", deps.join(" ")), dep_style));
                         }
@@ -114,40 +114,45 @@ impl MakefileEngine {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::White)
+                            Style::default().fg(Color::Yellow)
                         };
-                        spans.push(Span::styled("    ", Style::default()));
+                        spans.push(Span::styled("  ", Style::default()));
                         spans.push(Span::styled(cmd.clone(), style));
                     }
                     MakeLine::Variable { name, op, value } => {
                         let name_style = if selected {
+                            Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else {
+                            Style::default().fg(Color::White).bold()
+                        };
+                        let op_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightYellow)
+                            Style::default().fg(Color::DarkGray)
                         };
                         let val_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightCyan)
+                            Style::default().fg(Color::Yellow)
                         };
                         spans.push(Span::styled(name.clone(), name_style));
-                        spans.push(Span::styled(format!(" {} ", op), Style::default().fg(Color::White)));
+                        spans.push(Span::styled(format!(" {} ", op), op_style));
                         spans.push(Span::styled(truncate(value, 50), val_style));
                     }
                     MakeLine::Include(path) => {
-                        let style = if selected {
+                        let kw_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightMagenta)
+                            Style::default().fg(Color::Magenta)
                         };
-                        spans.push(Span::styled("include ", style));
-                        spans.push(Span::styled(path.clone(), Style::default().fg(Color::LightCyan)));
+                        spans.push(Span::styled("include ", kw_style));
+                        spans.push(Span::styled(path.clone(), Style::default().fg(Color::Green)));
                     }
                     MakeLine::Conditional(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightRed)
+                            Style::default().fg(Color::Magenta)
                         };
                         spans.push(Span::styled(text.clone(), style));
                     }
@@ -155,7 +160,7 @@ impl MakefileEngine {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(Color::DarkGray).italic()
                         };
                         spans.push(Span::styled(text.clone(), style));
                     }

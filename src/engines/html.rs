@@ -92,13 +92,13 @@ impl HtmlEngine {
             let mut cells = Vec::new();
             cells.push(
                 Cell::from((self.scroll + idx + 1).to_string())
-                    .style(Style::default().fg(Color::LightYellow)),
+                    .style(Style::default().fg(Color::DarkGray)),
             );
-            cells.push(Cell::from("│").style(Style::default().fg(Color::LightBlue)));
-            cells.push(Cell::from(indent_tag(row.depth, &row.tag)).style(Style::default().fg(Color::LightGreen)));
-            cells.push(Cell::from(row.id.clone()).style(Style::default().fg(Color::LightCyan)));
-            cells.push(Cell::from(row.class.clone()).style(Style::default().fg(Color::LightCyan)));
-            cells.push(Cell::from(row.text.clone()).style(Style::default().fg(Color::White)));
+            cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
+            cells.push(Cell::from(indent_tag(row.depth, &row.tag)).style(Style::default().fg(Color::Cyan).bold()));
+            cells.push(Cell::from(row.id.clone()).style(Style::default().fg(Color::Magenta)));
+            cells.push(Cell::from(row.class.clone()).style(Style::default().fg(Color::Green)));
+            cells.push(Cell::from(row.text.clone()).style(Style::default().fg(Color::Yellow)));
             rows.push(Row::new(cells));
         }
 

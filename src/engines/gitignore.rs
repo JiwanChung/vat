@@ -77,10 +77,10 @@ impl GitIgnoreEngine {
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::DarkGray)
                 };
                 spans.push(Span::styled(line_no_str, line_no_style));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 match parsed {
                     GitIgnoreLine::Pattern { pattern, is_negated, is_dir } => {
@@ -265,9 +265,9 @@ impl GitIgnoreEngine {
                 let mut spans = Vec::new();
                 spans.push(Span::styled(
                     format!("{:>width$} ", line_no, width = line_no_width),
-                    Style::default().fg(Color::LightYellow),
+                    Style::default().fg(Color::DarkGray),
                 ));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 match parsed {
                     GitIgnoreLine::Pattern { pattern, is_negated, .. } => {

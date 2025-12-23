@@ -137,7 +137,8 @@ impl JsonlEngine {
             serde_json::Value::Object(map) => {
                 for (key, val) in map.iter() {
                     let preview = self.value_preview(val);
-                    out.push((depth, format!("{}{}: {}", indent, key, preview), Style::default().fg(Color::LightCyan)));
+                    let style = self.value_style(val);
+                    out.push((depth, format!("{}{}: {}", indent, key, preview), style));
                     if matches!(val, serde_json::Value::Object(_) | serde_json::Value::Array(_)) {
                         self.flatten_json(val, depth + 1, out);
                     }
@@ -146,13 +147,25 @@ impl JsonlEngine {
             serde_json::Value::Array(arr) => {
                 for (idx, val) in arr.iter().enumerate() {
                     let preview = self.value_preview(val);
-                    out.push((depth, format!("{}[{}]: {}", indent, idx, preview), Style::default().fg(Color::LightYellow)));
+                    let style = self.value_style(val);
+                    out.push((depth, format!("{}[{}]: {}", indent, idx, preview), style));
                     if matches!(val, serde_json::Value::Object(_) | serde_json::Value::Array(_)) {
                         self.flatten_json(val, depth + 1, out);
                     }
                 }
             }
             _ => {}
+        }
+    }
+
+    fn value_style(&self, value: &serde_json::Value) -> Style {
+        match value {
+            serde_json::Value::Null => Style::default().fg(Color::DarkGray),
+            serde_json::Value::Bool(_) => Style::default().fg(Color::Cyan),
+            serde_json::Value::Number(_) => Style::default().fg(Color::Magenta),
+            serde_json::Value::String(_) => Style::default().fg(Color::Yellow),
+            serde_json::Value::Array(_) => Style::default().fg(Color::LightGreen),
+            serde_json::Value::Object(_) => Style::default().fg(Color::LightGreen),
         }
     }
 
@@ -207,17 +220,22 @@ impl JsonlEngine {
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::DarkGray)
                 };
                 spans.push(Span::styled(line_no, line_no_style));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 // Expand/collapse marker
                 if is_valid {
-                    let marker = if is_expanded { "[-] " } else { "[+] " };
-                    spans.push(Span::styled(marker, Style::default().fg(Color::Cyan)));
+                    let marker = if is_expanded { "▾ " } else { "▸ " };
+                    let marker_style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else {
+                        Style::default().fg(Color::Magenta)
+                    };
+                    spans.push(Span::styled(marker, marker_style));
                 } else {
-                    spans.push(Span::raw("    "));
+                    spans.push(Span::raw("  "));
                 }
 
                 let content_style = if selected {
@@ -242,7 +260,7 @@ impl JsonlEngine {
                             " ".repeat(line_no_width + 1),
                             Style::default(),
                         ));
-                        spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                        spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
                         spans.push(Span::styled(text, style));
                         visible_lines.push(Line::from(spans));
                     }
@@ -451,8 +469,8 @@ impl JsonlEngine {
                 let (preview, _) = self.parse_line_preview(content);
                 let mut spans = Vec::new();
                 let line_no = format!("{:>width$} ", idx + 1, width = line_no_width);
-                spans.push(Span::styled(line_no, Style::default().fg(Color::LightYellow)));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled(line_no, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
                 spans.push(Span::styled(preview, Style::default().fg(Color::LightGreen)));
                 Some(Line::from(spans))
             })

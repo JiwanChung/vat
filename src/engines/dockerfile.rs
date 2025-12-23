@@ -88,34 +88,39 @@ impl DockerfileEngine {
 
                 match parsed {
                     DockerLine::From { image, alias, stage_num } => {
+                        let stage_style = if selected {
+                            Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else {
+                            Style::default().fg(Color::DarkGray)
+                        };
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightMagenta).bold()
+                            Style::default().fg(Color::Magenta).bold()
                         };
                         let img_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightGreen)
+                            Style::default().fg(Color::Green)
                         };
-                        spans.push(Span::styled(format!("[Stage {}] ", stage_num), Style::default().fg(Color::Cyan)));
+                        spans.push(Span::styled(format!("[{}] ", stage_num), stage_style));
                         spans.push(Span::styled("FROM ", cmd_style));
                         spans.push(Span::styled(image.clone(), img_style));
                         if let Some(a) = alias {
                             spans.push(Span::styled(" AS ", cmd_style));
-                            spans.push(Span::styled(a.clone(), Style::default().fg(Color::LightCyan)));
+                            spans.push(Span::styled(a.clone(), Style::default().fg(Color::Cyan)));
                         }
                     }
                     DockerLine::Instruction { cmd, args } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightCyan).bold()
+                            Style::default().fg(Color::Cyan).bold()
                         };
                         let args_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::White)
+                            Style::default().fg(Color::Yellow)
                         };
                         spans.push(Span::styled(format!("{} ", cmd), cmd_style));
                         spans.push(Span::styled(truncate(args, 60), args_style));
@@ -124,40 +129,42 @@ impl DockerfileEngine {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightYellow).bold()
+                            Style::default().fg(Color::Cyan).bold()
                         };
                         spans.push(Span::styled("ARG ", cmd_style));
-                        spans.push(Span::styled(name.clone(), Style::default().fg(Color::LightGreen)));
+                        spans.push(Span::styled(name.clone(), Style::default().fg(Color::White).bold()));
                         if let Some(def) = default {
-                            spans.push(Span::styled("=", Style::default().fg(Color::White)));
-                            spans.push(Span::styled(def.clone(), Style::default().fg(Color::LightCyan)));
+                            spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                            spans.push(Span::styled(def.clone(), Style::default().fg(Color::Yellow)));
                         }
                     }
                     DockerLine::Env { key, value } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightYellow).bold()
+                            Style::default().fg(Color::Cyan).bold()
                         };
                         spans.push(Span::styled("ENV ", cmd_style));
-                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::LightGreen)));
-                        spans.push(Span::styled("=", Style::default().fg(Color::White)));
-                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::LightCyan)));
+                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::White).bold()));
+                        spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::Yellow)));
                     }
                     DockerLine::Label { key, value } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::DarkGray).bold()
+                            Style::default().fg(Color::DarkGray)
                         };
                         spans.push(Span::styled("LABEL ", cmd_style));
-                        spans.push(Span::styled(format!("{}={}", key, value), Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::DarkGray)));
                     }
                     DockerLine::Comment(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(Color::DarkGray).italic()
                         };
                         spans.push(Span::styled(text.clone(), style));
                     }

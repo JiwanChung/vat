@@ -132,12 +132,13 @@ impl HexEngine {
                 let addr_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::DarkGray)
                 };
                 spans.push(Span::styled(
                     format!("{:0width$X}  ", offset, width = addr_width),
                     addr_style,
                 ));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 // Hex bytes
                 for (i, &byte) in bytes.iter().enumerate() {
@@ -149,10 +150,16 @@ impl HexEngine {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
                     } else if byte == 0 {
                         Style::default().fg(Color::DarkGray)
+                    } else if byte.is_ascii_alphabetic() {
+                        Style::default().fg(Color::Cyan)
+                    } else if byte.is_ascii_digit() {
+                        Style::default().fg(Color::Magenta)
                     } else if byte.is_ascii_printable() {
-                        Style::default().fg(Color::LightGreen)
+                        Style::default().fg(Color::Green)
+                    } else if byte == 0xFF {
+                        Style::default().fg(Color::Red)
                     } else {
-                        Style::default().fg(Color::LightCyan)
+                        Style::default().fg(Color::Yellow)
                     };
 
                     spans.push(Span::styled(format!("{:02X} ", byte), byte_style));
@@ -166,7 +173,7 @@ impl HexEngine {
                     spans.push(Span::raw("   "));
                 }
 
-                spans.push(Span::raw(" "));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 // ASCII representation
                 let ascii_style = if selected {
@@ -359,10 +366,11 @@ impl HexEngine {
                     lines.push(Line::from(vec![
                         Span::styled(
                             format!("{:0width$X}  ", offset, width = addr_width),
-                            Style::default().fg(Color::LightYellow),
+                            Style::default().fg(Color::DarkGray),
                         ),
-                        Span::styled(hex, Style::default().fg(Color::LightCyan)),
-                        Span::raw(" "),
+                        Span::styled("│ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(hex, Style::default().fg(Color::Cyan)),
+                        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
                         Span::styled(ascii, Style::default().fg(Color::White)),
                     ]));
                 }

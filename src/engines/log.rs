@@ -111,10 +111,10 @@ impl LogEngine {
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightYellow)
+                    Style::default().fg(Color::DarkGray)
                 };
                 spans.push(Span::styled(line_no_str, line_no_style));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 // Timestamp
                 if let Some(ts) = &entry.timestamp {
@@ -322,9 +322,9 @@ impl LogEngine {
                 let mut spans = Vec::new();
                 spans.push(Span::styled(
                     format!("{:>width$} ", line_no, width = line_no_width),
-                    Style::default().fg(Color::LightYellow),
+                    Style::default().fg(Color::DarkGray),
                 ));
-                spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 if let Some(level) = entry.level {
                     let (text, color) = match level {
