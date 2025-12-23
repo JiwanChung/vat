@@ -1,0 +1,94 @@
+# Project Makefile
+# Build and test automation
+
+.PHONY: all build test clean install lint fmt docs release
+
+# Variables
+PROJECT_NAME := vat
+VERSION := $(shell cat VERSION 2>/dev/null || echo "0.1.0")
+CARGO := cargo
+RUSTFLAGS := -C target-cpu=native
+
+# Default target
+all: build
+
+# Build the project
+build:
+	@echo "Building $(PROJECT_NAME) v$(VERSION)..."
+	$(CARGO) build --release
+
+# Run tests
+test:
+	@echo "Running tests..."
+	$(CARGO) test --all-features
+
+# Run tests with coverage
+test-coverage:
+	@echo "Running tests with coverage..."
+	$(CARGO) tarpaulin --out Html
+
+# Clean build artifacts
+clean:
+	@echo "Cleaning..."
+	$(CARGO) clean
+	rm -rf target/
+	rm -rf dist/
+
+# Install locally
+install: build
+	@echo "Installing $(PROJECT_NAME)..."
+	$(CARGO) install --path .
+
+# Lint the code
+lint:
+	@echo "Linting..."
+	$(CARGO) clippy -- -D warnings
+
+# Format code
+fmt:
+	@echo "Formatting..."
+	$(CARGO) fmt
+
+# Check formatting
+fmt-check:
+	$(CARGO) fmt -- --check
+
+# Generate documentation
+docs:
+	@echo "Generating docs..."
+	$(CARGO) doc --no-deps --open
+
+# Create release build
+release: clean lint test
+	@echo "Creating release..."
+	RUSTFLAGS="$(RUSTFLAGS)" $(CARGO) build --release
+	mkdir -p dist
+	cp target/release/$(PROJECT_NAME) dist/
+	@echo "Release built: dist/$(PROJECT_NAME)"
+
+# Development helpers
+dev:
+	$(CARGO) watch -x run
+
+# Check for outdated dependencies
+outdated:
+	$(CARGO) outdated
+
+# Update dependencies
+update:
+	$(CARGO) update
+
+# Security audit
+audit:
+	$(CARGO) audit
+
+help:
+	@echo "Available targets:"
+	@echo "  build    - Build the project"
+	@echo "  test     - Run tests"
+	@echo "  clean    - Clean build artifacts"
+	@echo "  install  - Install locally"
+	@echo "  lint     - Run clippy"
+	@echo "  fmt      - Format code"
+	@echo "  docs     - Generate documentation"
+	@echo "  release  - Create release build"

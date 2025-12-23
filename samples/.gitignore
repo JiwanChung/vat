@@ -1,0 +1,74 @@
+# Build artifacts
+/target/
+/dist/
+*.o
+*.a
+*.so
+*.dylib
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment and secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+credentials.json
+
+# Dependencies
+node_modules/
+vendor/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Rust specific
+Cargo.lock
+*.rlib
+
+# Build caches
+.cache/
+.gradle/
+.npm/
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+*.gcno
+*.gcda
+tarpaulin-report.html
+
+# Documentation builds
+/docs/_build/
+/site/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+.~lock.*
+
+# OS generated
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Package files
+*.tar.gz
+*.zip
+*.rar
+
+# Database files
+*.sqlite
+*.db
+*.sqlite3

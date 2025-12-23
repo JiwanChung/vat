@@ -2,6 +2,16 @@
 name = "vat"
 version = "0.1.0"
 edition = "2021"
+description = "A semantic file viewer that renders files in the most intuitive terminal view"
+repository = "https://github.com/JiwanChung/vat"
+license = "MIT"
+readme = "README.md"
+keywords = ["cli", "terminal", "viewer", "tui", "file"]
+categories = ["command-line-utilities", "visualization"]
+
+[[bin]]
+name = "vat"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
@@ -14,7 +24,8 @@ serde_json = "1"
 serde_yaml = "0.9"
 toml = "0.8"
 kdl = "4"
-polars = { version = "0.38", features = ["csv", "parquet"] }
+polars = { version = "0.38", features = ["csv", "parquet", "lazy"] }
+memmap2 = "0.9"
 nom = "7"
 syntect = { version = "5", default-features = false, features = ["default-fancy"] }
 arboard = "3"
@@ -25,3 +36,10 @@ tree-sitter = "0.22"
 tree-sitter-javascript = "0.21"
 tree-sitter-typescript = "0.21"
 tree-sitter-css = "0.21"
+tempfile = "3"
+roxmltree = "0.19"
+zip = "0.6"
+tar = "0.4"
+flate2 = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }

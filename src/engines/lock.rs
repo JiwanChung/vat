@@ -183,7 +183,15 @@ impl LockEngine {
             .as_ref()
             .map(|q| format!(" | search: {}", q))
             .unwrap_or_default();
-        format!("j/k move | gg/G jump | n/N next/prev | / search{}", query)
+        format!("j/k move | gg/G jump | n/N next/prev | / search | f filter{}", query)
+    }
+
+    pub fn apply_filter(&mut self, query: &str) {
+        self.apply_search(query);
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.last_query = None;
     }
 
     #[allow(dead_code)]

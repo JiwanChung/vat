@@ -2,13 +2,17 @@ use std::fs::File;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use polars::prelude::*;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
 
+/// TableEngine for CSV/TSV/Parquet files.
+/// Uses Polars DataFrame for efficient columnar storage.
+/// Note: For CSV files, the entire file is loaded into memory since CSV doesn't support
+/// random access. For Parquet, Polars uses efficient columnar storage with lazy evaluation.
 pub struct TableEngine {
     df: DataFrame,
     selection: usize,
@@ -165,11 +169,11 @@ impl TableEngine {
             KeyCode::Char('k') | KeyCode::Up => {
                 self.selection = self.selection.saturating_sub(1);
             }
-            KeyCode::Char('u') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let jump = page_jump(self.last_view_height).min(self.selection);
                 self.selection = self.selection.saturating_sub(jump);
             }
-            KeyCode::Char('d') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let max_rows = if self.schema_view {
                     self.df.schema().len()
                 } else {
@@ -211,7 +215,7 @@ impl TableEngine {
     }
 
     pub fn breadcrumbs(&self) -> String {
-        format!("{} row {}", self.file_name, self.selection + 1)
+        format!("{} row {}/{}", self.file_name, self.selection + 1, self.df.height())
     }
 
     pub fn status_line(&self) -> String {
@@ -222,9 +226,18 @@ impl TableEngine {
             .map(|q| format!(" | search: {}", q))
             .unwrap_or_default();
         format!(
-            "j/k move | gg/G jump | Ctrl+u/d half-page | n/N next/prev | s toggle schema | / search{} | view: {}",
+            "j/k move | gg/G jump | Ctrl+u/d half-page | n/N next/prev | s toggle schema | / search | f filter{} | view: {}",
             query, view
         )
+    }
+
+    pub fn apply_filter(&mut self, query: &str) {
+        // For table, filter acts like search - jump to matching rows
+        self.apply_search(query);
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.last_query = None;
     }
 
     #[allow(dead_code)]
@@ -245,6 +258,7 @@ impl TableEngine {
             self.scroll = self.selection.saturating_sub(height - 1);
         }
 
+        // Only render the visible slice (data is already in memory, just slicing the view)
         let slice = self
             .df
             .slice(self.scroll as i64, height.min(self.df.height()));
@@ -308,26 +322,7 @@ impl TableEngine {
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(ratatui::widgets::Paragraph::new(lines).block(block), area);
     }
-}
 
-fn make_widths(cols: usize) -> Vec<Constraint> {
-    if cols == 0 {
-        return vec![Constraint::Percentage(100)];
-    }
-    let base = 100 / cols as u16;
-    let mut widths = vec![Constraint::Percentage(base); cols];
-    if let Some(last) = widths.last_mut() {
-        *last = Constraint::Percentage(100 - base * (cols as u16 - 1));
-    }
-    widths
-}
-
-fn page_jump(view_height: usize) -> usize {
-    let half = view_height / 2;
-    if half == 0 { 1 } else { half }
-}
-
-impl TableEngine {
     fn search_next(&mut self, query: &str, forward: bool) {
         let trimmed = query.trim();
         if trimmed.is_empty() {
@@ -362,6 +357,23 @@ impl TableEngine {
         }
         self.last_match = Some(trimmed.to_string());
     }
+}
+
+fn make_widths(cols: usize) -> Vec<Constraint> {
+    if cols == 0 {
+        return vec![Constraint::Percentage(100)];
+    }
+    let base = 100 / cols as u16;
+    let mut widths = vec![Constraint::Percentage(base); cols];
+    if let Some(last) = widths.last_mut() {
+        *last = Constraint::Percentage(100 - base * (cols as u16 - 1));
+    }
+    widths
+}
+
+fn page_jump(view_height: usize) -> usize {
+    let half = view_height / 2;
+    if half == 0 { 1 } else { half }
 }
 
 fn join_with_sep(mut spans: Vec<Span<'static>>, sep: &str) -> Vec<Span<'static>> {

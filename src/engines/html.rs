@@ -207,9 +207,17 @@ impl HtmlEngine {
             .map(|q| format!(" | search: {}", q))
             .unwrap_or_default();
         format!(
-            "j/k move | gg/G jump | Ctrl+u/d half-page | n/N next/prev | Enter fold | / search{}",
+            "j/k move | gg/G jump | Ctrl+u/d half-page | n/N next/prev | Enter fold | / search | f filter{}",
             query
         )
+    }
+
+    pub fn apply_filter(&mut self, query: &str) {
+        self.apply_search(query);
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.last_query = None;
     }
 
     #[allow(dead_code)]

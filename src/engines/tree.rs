@@ -1,12 +1,18 @@
 use std::collections::HashSet;
+use std::fs::File;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{KeyCode, KeyEvent};
+use memmap2::Mmap;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem};
+
+/// Maximum file size for TreeEngine (50MB)
+/// For larger files, recommend using JSONL format instead
+const MAX_TREE_FILE_SIZE: u64 = 50 * 1024 * 1024;
 
 #[derive(Clone)]
 enum NodeKind {
@@ -48,8 +54,36 @@ pub struct TreeEngine {
 }
 
 impl TreeEngine {
+    /// Create TreeEngine from file path
+    /// Uses mmap for efficient file reading
+    pub fn from_path(path: &Path) -> Result<Self> {
+        let file = File::open(path)?;
+        let metadata = file.metadata()?;
+
+        // Warn for very large files
+        if metadata.len() > MAX_TREE_FILE_SIZE {
+            return Err(anyhow!(
+                "File too large ({:.1}MB) for tree view. Maximum: {}MB.\n\
+                 Tip: For large datasets, use JSONL format (.jsonl) which supports streaming.",
+                metadata.len() as f64 / 1024.0 / 1024.0,
+                MAX_TREE_FILE_SIZE / 1024 / 1024
+            ));
+        }
+
+        // Use mmap for efficient reading (avoids memory copy)
+        let mmap = unsafe { Mmap::map(&file)? };
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        Self::from_bytes_internal(ext, &mmap)
+    }
+
+    /// Create TreeEngine from bytes (used by tests)
+    #[allow(dead_code)]
     pub fn from_bytes(path: &Path, bytes: &[u8]) -> Result<Self> {
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        Self::from_bytes_internal(ext, bytes)
+    }
+
+    fn from_bytes_internal(ext: &str, bytes: &[u8]) -> Result<Self> {
         let value = parse_value(ext, bytes)?;
         let mut arena = Vec::new();
         let root = build_json_node(&value, "root".to_string(), &mut arena);
@@ -274,9 +308,18 @@ impl TreeEngine {
             .map(|q| format!(" | search: {}", q))
             .unwrap_or_default();
         format!(
-            "j/k move | gg/G jump | Ctrl+u/d half-page | e next top | n/N next/prev | Enter fold | y copy path | / search{}",
+            "j/k move | gg/G jump | Ctrl+u/d half-page | e next top | n/N next/prev | Enter fold | y copy path | / search | f filter{}",
             query
         )
+    }
+
+    pub fn apply_filter(&mut self, query: &str) {
+        // For tree, filter acts like search - jump to matching nodes
+        self.apply_search(query);
+    }
+
+    pub fn clear_filter(&mut self) {
+        self.last_query = None;
     }
 
     pub fn selected_path(&self) -> Option<String> {

@@ -1,5 +1,6 @@
-use std::io::{self, Write};
-use std::path::Path;
+use std::fs;
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -22,6 +23,8 @@ use crate::engines::EngineState;
 struct InputState {
     active: bool,
     buffer: String,
+    /// If true, input is for filter mode instead of search
+    is_filter: bool,
 }
 
 pub struct App {
@@ -29,26 +32,50 @@ pub struct App {
     should_quit: bool,
     input: InputState,
     status: Option<String>,
+    /// Display path (shown in header)
     file_path: String,
+    /// Actual file path for raw mode (may differ from display path for stdin)
+    source_path: PathBuf,
     paging: Paging,
+    force_raw: bool,
+    /// Active filter query (shows only matching lines)
+    filter: Option<String>,
+    /// Show help overlay
+    show_help: bool,
 }
 
 impl App {
-    pub fn new(engine: EngineState, file_path: String, paging: Paging) -> Self {
+    pub fn new(
+        engine: EngineState,
+        file_path: String,
+        source_path: PathBuf,
+        paging: Paging,
+        force_raw: bool,
+    ) -> Self {
         Self {
             engine,
             should_quit: false,
             input: InputState {
                 active: false,
                 buffer: String::new(),
+                is_filter: false,
             },
             status: None,
             file_path,
+            source_path,
             paging,
+            force_raw,
+            filter: None,
+            show_help: false,
         }
     }
 
     pub fn run(&mut self) -> Result<()> {
+        // When stdout is piped (not a TTY) or --plain flag is set, output raw content
+        if self.force_raw || !io::stdout().is_terminal() {
+            return self.run_raw();
+        }
+
         let (cols, rows) = terminal::size()?;
         match self.paging {
             Paging::Always => return self.run_tui(),
@@ -63,6 +90,21 @@ impl App {
             return self.run_plain(cols);
         }
         self.run_tui()
+    }
+
+    /// Output raw file content without any formatting (for piping)
+    /// Uses streaming to handle arbitrarily large files efficiently
+    fn run_raw(&self) -> Result<()> {
+        let mut file = fs::File::open(&self.source_path)?;
+        let mut stdout = io::stdout().lock();
+        // Ignore broken pipe errors (e.g., when piping to head/tail)
+        if let Err(e) = io::copy(&mut file, &mut stdout) {
+            if e.kind() != io::ErrorKind::BrokenPipe {
+                return Err(e.into());
+            }
+        }
+        let _ = stdout.flush();
+        Ok(())
     }
 
     fn run_plain(&mut self, cols: u16) -> Result<()> {
@@ -103,6 +145,14 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
+        // Handle help overlay first
+        if self.show_help {
+            if matches!(key.code, KeyCode::Esc | KeyCode::Char('?') | KeyCode::Char('q')) {
+                self.show_help = false;
+            }
+            return;
+        }
+
         if self.input.active {
             match key.code {
                 KeyCode::Esc => {
@@ -112,7 +162,12 @@ impl App {
                 KeyCode::Enter => {
                     let query = self.input.buffer.trim().to_string();
                     if !query.is_empty() {
-                        self.engine.apply_search(&query);
+                        if self.input.is_filter {
+                            self.filter = Some(query.clone());
+                            self.engine.apply_filter(&query);
+                        } else {
+                            self.engine.apply_search(&query);
+                        }
                     }
                     self.input.active = false;
                     self.input.buffer.clear();
@@ -141,6 +196,9 @@ impl App {
             KeyCode::Char('q') => {
                 self.should_quit = true;
             }
+            KeyCode::Char('?') => {
+                self.show_help = true;
+            }
             KeyCode::Char('y') => {
                 if let Some(path) = self.engine.selected_path() {
                     if let Ok(mut clipboard) = Clipboard::new() {
@@ -150,11 +208,25 @@ impl App {
                     }
                 }
             }
-            KeyCode::Char('/') | KeyCode::Char('?') => {
+            KeyCode::Char('/') => {
                 if self.engine.supports_search() {
                     self.input.active = true;
+                    self.input.is_filter = false;
                     self.input.buffer.clear();
                 }
+            }
+            KeyCode::Char('f') => {
+                if self.engine.supports_search() {
+                    self.input.active = true;
+                    self.input.is_filter = true;
+                    self.input.buffer.clear();
+                }
+            }
+            KeyCode::Char('F') => {
+                // Clear filter
+                self.filter = None;
+                self.engine.clear_filter();
+                self.status = Some("Filter cleared".to_string());
             }
             _ => {
                 self.engine.handle_key(key);
@@ -192,7 +264,8 @@ impl App {
         self.engine.render(frame, chunks[1]);
 
         let status_text = if self.input.active {
-            format!("Search: {}_", self.input.buffer)
+            let prompt = if self.input.is_filter { "Filter" } else { "Search" };
+            format!("{}: {}_", prompt, self.input.buffer)
         } else if let Some(status) = self.status.take() {
             status
         } else {
@@ -211,6 +284,68 @@ impl App {
             .block(Block::default().borders(Borders::TOP))
             .style(footer_style);
         frame.render_widget(footer, chunks[2]);
+
+        // Help overlay
+        if self.show_help {
+            self.render_help_overlay(frame);
+        }
+    }
+
+    fn render_help_overlay(&self, frame: &mut ratatui::Frame) {
+        use ratatui::widgets::Clear;
+
+        let help_text = vec![
+            Line::from(Span::styled("Keyboard Shortcuts", Style::default().bold().fg(ratatui::style::Color::LightCyan))),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Navigation", Style::default().bold()),
+            ]),
+            Line::from("  j/k, ↑/↓     Move up/down"),
+            Line::from("  gg           Jump to top"),
+            Line::from("  G            Jump to bottom"),
+            Line::from("  Ctrl+u/d     Half-page up/down"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Search & Filter", Style::default().bold()),
+            ]),
+            Line::from("  /            Search"),
+            Line::from("  f            Filter (show only matches)"),
+            Line::from("  F            Clear filter"),
+            Line::from("  n/N          Next/previous match"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Actions", Style::default().bold()),
+            ]),
+            Line::from("  Enter        Expand/collapse (tree/json)"),
+            Line::from("  y            Copy path (tree view)"),
+            Line::from("  s            Toggle sidebar/schema"),
+            Line::from("  e            Next section/heading"),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("General", Style::default().bold()),
+            ]),
+            Line::from("  ?            Show/hide this help"),
+            Line::from("  q            Quit"),
+            Line::from(""),
+            Line::from(Span::styled("Press ? or Esc to close", Style::default().fg(ratatui::style::Color::DarkGray))),
+        ];
+
+        let block = Block::default()
+            .title(" Help ")
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(ratatui::style::Color::LightCyan))
+            .style(Style::default().bg(ratatui::style::Color::Black));
+
+        let area = frame.size();
+        let width = 50.min(area.width.saturating_sub(4));
+        let height = (help_text.len() as u16 + 2).min(area.height.saturating_sub(4));
+        let x = (area.width.saturating_sub(width)) / 2;
+        let y = (area.height.saturating_sub(height)) / 2;
+
+        let popup_area = ratatui::layout::Rect::new(x, y, width, height);
+
+        frame.render_widget(Clear, popup_area);
+        frame.render_widget(Paragraph::new(help_text).block(block), popup_area);
     }
 
     fn plain_header_lines(&self, inner_width: usize) -> Vec<Line<'static>> {

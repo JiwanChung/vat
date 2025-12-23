@@ -2,14 +2,18 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::engines::{EngineState, HtmlEngine, LockEngine, LogicEngine, SyntaxEngine, TableEngine, TreeEngine, TextEngine};
+use crate::engines::{
+    ArchiveEngine, DockerfileEngine, EngineState, EnvEngine, GitIgnoreEngine, HexEngine,
+    HtmlEngine, ImageEngine, IniEngine, JsonlEngine, LockEngine, LogEngine, LogicEngine,
+    MakefileEngine, SqliteEngine, SyntaxEngine, TableEngine, TextEngine, TreeEngine, XmlEngine,
+};
 
 pub fn analyze(path: &Path) -> Result<EngineState> {
-    let bytes = std::fs::read(path)?;
     let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
-    if is_parquet(&bytes) || ext == "parquet" {
+    // Check for parquet magic bytes (need to read first 4 bytes)
+    if ext == "parquet" || is_parquet_file(path) {
         return TableEngine::from_path(path).map(EngineState::Table);
     }
 
@@ -17,8 +21,59 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return TableEngine::from_path(path).map(EngineState::Table);
     }
 
+    // JSONL / NDJSON (JSON Lines) - each line is a separate JSON object
+    if matches!(ext.as_str(), "jsonl" | "ndjson") {
+        return JsonlEngine::from_path(path).map(EngineState::Jsonl);
+    }
+
+    // Structured data formats - uses mmap + size checking
     if matches!(ext.as_str(), "json" | "yaml" | "yml" | "toml" | "kdl") {
-        return TreeEngine::from_bytes(path, &bytes).map(EngineState::Tree);
+        return TreeEngine::from_path(path).map(EngineState::Tree);
+    }
+
+    // XML files
+    if ext == "xml" {
+        return XmlEngine::from_path(path).map(EngineState::Xml);
+    }
+
+    // SQLite database files
+    if matches!(ext.as_str(), "db" | "sqlite" | "sqlite3") {
+        return SqliteEngine::from_path(path).map(EngineState::Sqlite);
+    }
+
+    // Archive files
+    if matches!(ext.as_str(), "zip" | "tar" | "tgz") || file_name.ends_with(".tar.gz") {
+        return ArchiveEngine::from_path(path).map(EngineState::Archive);
+    }
+
+    // Image files
+    if matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp" | "ico") {
+        return ImageEngine::from_path(path).map(EngineState::Image);
+    }
+
+    // INI/Properties config files
+    if matches!(ext.as_str(), "ini" | "cfg" | "properties" | "conf") {
+        return IniEngine::from_path(path).map(EngineState::Ini);
+    }
+
+    // Dockerfile
+    if file_name == "Dockerfile" || file_name.starts_with("Dockerfile.") {
+        return DockerfileEngine::from_path(path).map(EngineState::Dockerfile);
+    }
+
+    // Makefile
+    if file_name == "Makefile" || file_name == "makefile" || file_name == "GNUmakefile" || ext == "mk" {
+        return MakefileEngine::from_path(path).map(EngineState::Makefile);
+    }
+
+    // Log files
+    if ext == "log" {
+        return LogEngine::from_path(path).map(EngineState::Log);
+    }
+
+    // GitIgnore and similar
+    if file_name == ".gitignore" || file_name == ".dockerignore" || file_name == ".npmignore" {
+        return GitIgnoreEngine::from_path(path).map(EngineState::GitIgnore);
     }
 
     if is_logic_file(path, file_name) {
@@ -29,6 +84,11 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return LockEngine::from_path(path).map(EngineState::Lock);
     }
 
+    // .env files and similar environment configs
+    if is_env_file(file_name, &ext) {
+        return EnvEngine::from_path(path).map(EngineState::Env);
+    }
+
     if matches!(ext.as_str(), "html" | "htm") {
         return HtmlEngine::from_path(path).map(EngineState::Html);
     }
@@ -37,11 +97,27 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return SyntaxEngine::from_path(path).map(EngineState::Syntax);
     }
 
+    // Check if binary file - fallback to hex viewer
+    if is_binary_file(path) {
+        return HexEngine::from_path(path).map(EngineState::Hex);
+    }
+
     TextEngine::from_path(path).map(EngineState::Text)
 }
 
-fn is_parquet(bytes: &[u8]) -> bool {
-    bytes.len() >= 4 && &bytes[0..4] == b"PAR1"
+fn is_parquet_file(path: &Path) -> bool {
+    use std::fs::File;
+    use std::io::Read;
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut magic = [0u8; 4];
+    if file.read_exact(&mut magic).is_err() {
+        return false;
+    }
+    &magic == b"PAR1"
 }
 
 fn is_logic_file(path: &Path, file_name: &str) -> bool {
@@ -69,11 +145,60 @@ fn is_lock_file(_path: &Path, file_name: &str) -> bool {
         || file_name == "pnpm-lock.yml"
 }
 
+fn is_env_file(file_name: &str, ext: &str) -> bool {
+    file_name == ".env"
+        || file_name.starts_with(".env.")
+        || ext == "env"
+        || file_name.ends_with(".env")
+}
+
 fn is_code_ext(ext: &str) -> bool {
     matches!(
         ext,
-        "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "css" | "tcss" | "md"
+        "rs" | "js" | "jsx" | "ts" | "tsx" | "py" | "css" | "tcss" | "md" | "sql"
     )
+}
+
+fn is_binary_file(path: &Path) -> bool {
+    use std::fs::File;
+    use std::io::Read;
+
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+
+    let mut buffer = [0u8; 8192];
+    let bytes_read = match file.read(&mut buffer) {
+        Ok(n) => n,
+        Err(_) => return false,
+    };
+
+    // Check for null bytes or high proportion of non-printable characters
+    let mut null_count = 0;
+    let mut non_text_count = 0;
+
+    for &byte in &buffer[..bytes_read] {
+        if byte == 0 {
+            null_count += 1;
+        }
+        // Non-printable and non-whitespace
+        if byte < 0x09 || (byte > 0x0D && byte < 0x20) || byte == 0x7F {
+            non_text_count += 1;
+        }
+    }
+
+    // If there are any null bytes, likely binary
+    if null_count > 0 {
+        return true;
+    }
+
+    // If more than 30% non-text characters, likely binary
+    if bytes_read > 0 && non_text_count * 100 / bytes_read > 30 {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]

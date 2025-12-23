@@ -1,0 +1,29 @@
+2024-01-15 08:00:01.123 INFO  [main] Application starting up...
+2024-01-15 08:00:01.234 DEBUG [config] Loading configuration from /etc/app/config.yaml
+2024-01-15 08:00:01.345 INFO  [config] Configuration loaded successfully
+2024-01-15 08:00:01.456 DEBUG [db] Initializing database connection pool
+2024-01-15 08:00:01.567 INFO  [db] Connected to database: postgres://localhost:5432/myapp
+2024-01-15 08:00:01.678 DEBUG [cache] Initializing Redis cache connection
+2024-01-15 08:00:01.789 INFO  [cache] Redis connected: 127.0.0.1:6379
+2024-01-15 08:00:02.000 INFO  [server] HTTP server listening on 0.0.0.0:8080
+2024-01-15 08:00:15.123 INFO  [request] GET /api/v1/users - 200 OK (15ms)
+2024-01-15 08:00:15.456 DEBUG [auth] Token validated for user: admin@example.com
+2024-01-15 08:00:16.789 INFO  [request] POST /api/v1/orders - 201 Created (45ms)
+2024-01-15 08:00:17.012 WARN  [rate-limit] Rate limit approaching for IP: 192.168.1.100
+2024-01-15 08:00:18.345 INFO  [request] GET /api/v1/products - 200 OK (12ms)
+2024-01-15 08:00:19.678 ERROR [db] Query timeout: SELECT * FROM large_table WHERE status = 'pending'
+2024-01-15 08:00:19.789 WARN  [db] Retrying query with extended timeout...
+2024-01-15 08:00:22.012 INFO  [db] Query succeeded on retry (2234ms)
+2024-01-15 08:00:25.345 DEBUG [gc] Garbage collection completed: freed 128MB
+2024-01-15 08:00:30.678 INFO  [metrics] CPU: 45%, Memory: 2.1GB, Connections: 150
+2024-01-15 08:00:45.012 ERROR [payment] Payment gateway timeout for order #12345
+2024-01-15 08:00:45.123 ERROR [payment] Stack trace:
+    at PaymentService.processPayment (payment.rs:145)
+    at OrderHandler.create (orders.rs:89)
+    at Router.handle (router.rs:234)
+2024-01-15 08:00:45.234 WARN  [alert] Sending alert to ops team: payment-gateway-down
+2024-01-15 08:00:50.567 INFO  [payment] Payment gateway recovered
+2024-01-15 08:01:00.000 INFO  [health] Health check passed: all systems operational
+2024-01-15 08:01:30.123 DEBUG [session] Session cleanup: removed 45 expired sessions
+2024-01-15 08:02:00.456 INFO  [backup] Starting scheduled backup...
+2024-01-15 08:02:15.789 INFO  [backup] Backup completed: 2.5GB written to s3://backups/2024-01-15/
