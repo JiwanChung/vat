@@ -12,7 +12,7 @@ Set Padding 20
 Set TypingSpeed 50ms
 
 # JSON Demo
-Type "vat examples/sample.json"
+Type "vat --paging=always examples/sample.json"
 Sleep 400ms
 Enter
 Sleep 1.2s
@@ -46,7 +46,7 @@ Type "q"
 Sleep 400ms
 
 # CSV Demo
-Type "vat examples/users.csv"
+Type "vat --paging=always examples/users.csv"
 Sleep 400ms
 Enter
 Sleep 1.2s
@@ -73,7 +73,7 @@ Type "q"
 Sleep 400ms
 
 # Cargo.toml Demo
-Type "vat Cargo.toml"
+Type "vat --paging=always Cargo.toml"
 Sleep 400ms
 Enter
 Sleep 1.2s
