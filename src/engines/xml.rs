@@ -122,44 +122,55 @@ impl XmlEngine {
 
                 // Collapse marker
                 if node.has_children {
-                    let marker = if is_collapsed { "[+] " } else { "[-] " };
-                    spans.push(Span::styled(marker, Style::default().fg(Color::Cyan)));
+                    let marker = if is_collapsed { "▸ " } else { "▾ " };
+                    let marker_style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else {
+                        Style::default().fg(Color::Magenta)
+                    };
+                    spans.push(Span::styled(marker, marker_style));
                 } else {
-                    spans.push(Span::raw("    "));
+                    spans.push(Span::raw("  "));
                 }
 
-                // Tag
+                // Tag opening bracket and name
+                let bracket_style = if selected {
+                    Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
                 let tag_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else {
-                    Style::default().fg(Color::LightGreen).bold()
+                    Style::default().fg(Color::Cyan).bold()
                 };
-                spans.push(Span::styled(format!("<{}", node.tag), tag_style));
+                spans.push(Span::styled("<", bracket_style));
+                spans.push(Span::styled(node.tag.clone(), tag_style));
 
                 // Attributes
                 for (key, value) in &node.attributes {
                     let attr_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
                     } else {
-                        Style::default().fg(Color::LightCyan)
+                        Style::default().fg(Color::White)
                     };
                     let val_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
                     } else {
-                        Style::default().fg(Color::LightYellow)
+                        Style::default().fg(Color::Yellow)
                     };
                     spans.push(Span::styled(format!(" {}=", key), attr_style));
                     spans.push(Span::styled(format!("\"{}\"", truncate(value, 20)), val_style));
                 }
 
-                spans.push(Span::styled(">", tag_style));
+                spans.push(Span::styled(">", bracket_style));
 
                 // Text content
                 if let Some(text) = &node.text {
                     let text_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(Color::Yellow)
                     };
                     spans.push(Span::styled(format!(" {}", truncate(text, 40)), text_style));
                 }

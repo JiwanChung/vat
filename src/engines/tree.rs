@@ -31,6 +31,15 @@ struct Node {
     children: Vec<usize>,
 }
 
+enum ValueKind {
+    Null,
+    Bool,
+    Number,
+    String,
+    Object,
+    Array,
+}
+
 struct FlatNode {
     arena_idx: usize,
     depth: usize,
@@ -38,6 +47,7 @@ struct FlatNode {
     breadcrumb: String,
     label: String,
     value_preview: String,
+    value_kind: ValueKind,
     is_container: bool,
 }
 
@@ -149,24 +159,49 @@ impl TreeEngine {
                 spans.push(Span::raw(indent));
                 if flat.is_container {
                     let marker = if self.collapsed.contains(&flat.copy_path) {
-                        "[+] "
+                        "▸ "
                     } else {
-                        "[-] "
+                        "▾ "
                     };
-                    spans.push(Span::styled(marker, Style::default().fg(Color::Cyan)));
+                    let marker_style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else {
+                        Style::default().fg(Color::Magenta)
+                    };
+                    spans.push(Span::styled(marker, marker_style));
                 } else {
-                    spans.push(Span::raw("    "));
+                    spans.push(Span::raw("  "));
                 }
-                spans.push(Span::styled(
-                    format!("{}", flat.label),
-                    Style::default().bold().fg(Color::LightCyan),
-                ));
+
+                // Key/label styling
+                let key_style = if selected {
+                    Style::default().bold().fg(Color::Black).bg(Color::LightBlue)
+                } else {
+                    Style::default().bold().fg(Color::White)
+                };
+                spans.push(Span::styled(format!("{}", flat.label), key_style));
+
                 if !flat.value_preview.is_empty() {
-                    spans.push(Span::raw(" = "));
-                    spans.push(Span::styled(
-                        flat.value_preview.clone(),
-                        Style::default().fg(Color::LightGreen),
-                    ));
+                    let colon_style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    };
+                    spans.push(Span::styled(": ", colon_style));
+
+                    // Type-specific value colors
+                    let value_style = if selected {
+                        Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else {
+                        match flat.value_kind {
+                            ValueKind::String => Style::default().fg(Color::Yellow),
+                            ValueKind::Number => Style::default().fg(Color::Magenta),
+                            ValueKind::Bool => Style::default().fg(Color::Cyan),
+                            ValueKind::Null => Style::default().fg(Color::DarkGray),
+                            ValueKind::Object | ValueKind::Array => Style::default().fg(Color::LightGreen),
+                        }
+                    };
+                    spans.push(Span::styled(flat.value_preview.clone(), value_style));
                 }
                 let mut item = ListItem::new(Line::from(spans));
                 if in_visual && !selected {
@@ -205,24 +240,28 @@ impl TreeEngine {
                 spans.push(Span::raw(indent));
                 if flat.is_container {
                     let marker = if self.collapsed.contains(&flat.copy_path) {
-                        "[+] "
+                        "▸ "
                     } else {
-                        "[-] "
+                        "▾ "
                     };
-                    spans.push(Span::styled(marker, Style::default().fg(Color::Cyan)));
+                    spans.push(Span::styled(marker, Style::default().fg(Color::Magenta)));
                 } else {
-                    spans.push(Span::raw("    "));
+                    spans.push(Span::raw("  "));
                 }
                 spans.push(Span::styled(
                     format!("{}", flat.label),
-                    Style::default().bold().fg(Color::LightCyan),
+                    Style::default().bold().fg(Color::White),
                 ));
                 if !flat.value_preview.is_empty() {
-                    spans.push(Span::raw(" = "));
-                    spans.push(Span::styled(
-                        flat.value_preview.clone(),
-                        Style::default().fg(Color::LightGreen),
-                    ));
+                    spans.push(Span::styled(": ", Style::default().fg(Color::DarkGray)));
+                    let value_style = match flat.value_kind {
+                        ValueKind::String => Style::default().fg(Color::Yellow),
+                        ValueKind::Number => Style::default().fg(Color::Magenta),
+                        ValueKind::Bool => Style::default().fg(Color::Cyan),
+                        ValueKind::Null => Style::default().fg(Color::DarkGray),
+                        ValueKind::Object | ValueKind::Array => Style::default().fg(Color::LightGreen),
+                    };
+                    spans.push(Span::styled(flat.value_preview.clone(), value_style));
                 }
                 Line::from(spans)
             })
@@ -431,20 +470,20 @@ impl TreeEngine {
         };
         let copy_path = path_from_segments(segments);
         let breadcrumb = segments.join(" > ");
-        let (value_preview, is_container) = match &kind {
-            NodeKind::Null => ("[null]".to_string(), false),
-            NodeKind::Bool(value) => (format!("[bool] {}", value), false),
-            NodeKind::Number(value) => (format!("[num] {}", value), false),
+        let (value_preview, value_kind, is_container) = match &kind {
+            NodeKind::Null => ("null".to_string(), ValueKind::Null, false),
+            NodeKind::Bool(value) => (value.to_string(), ValueKind::Bool, false),
+            NodeKind::Number(value) => (value.clone(), ValueKind::Number, false),
             NodeKind::String(value) => {
                 let mut preview = value.clone();
-                if preview.len() > 40 {
-                    preview.truncate(37);
+                if preview.len() > 50 {
+                    preview.truncate(47);
                     preview.push_str("...");
                 }
-                (format!("[str] \"{}\"", preview), false)
+                (format!("\"{}\"", preview), ValueKind::String, false)
             }
-            NodeKind::Object => ("[obj]".to_string(), true),
-            NodeKind::Array => ("[arr]".to_string(), true),
+            NodeKind::Object => ("{...}".to_string(), ValueKind::Object, true),
+            NodeKind::Array => ("[...]".to_string(), ValueKind::Array, true),
         };
 
         self.flat.push(FlatNode {
@@ -454,6 +493,7 @@ impl TreeEngine {
             breadcrumb,
             label,
             value_preview,
+            value_kind,
             is_container,
         });
 

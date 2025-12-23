@@ -348,12 +348,32 @@ impl TableEngine {
             let mut cells = Vec::new();
             cells.push(
                 Cell::from((self.scroll + row_idx + 1).to_string())
-                    .style(Style::default().fg(Color::LightYellow)),
+                    .style(Style::default().fg(Color::DarkGray)),
             );
-            cells.push(Cell::from("│").style(Style::default().fg(Color::LightBlue)));
+            cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
             for series in slice.get_columns() {
                 let value = series.get(row_idx).map(|v| v.to_string()).unwrap_or_default();
-                cells.push(Cell::from(value).style(Style::default().fg(Color::LightGreen)));
+                // Color based on data type
+                let style = match series.dtype() {
+                    polars::datatypes::DataType::Int8
+                    | polars::datatypes::DataType::Int16
+                    | polars::datatypes::DataType::Int32
+                    | polars::datatypes::DataType::Int64
+                    | polars::datatypes::DataType::UInt8
+                    | polars::datatypes::DataType::UInt16
+                    | polars::datatypes::DataType::UInt32
+                    | polars::datatypes::DataType::UInt64
+                    | polars::datatypes::DataType::Float32
+                    | polars::datatypes::DataType::Float64 => Style::default().fg(Color::Magenta),
+                    polars::datatypes::DataType::Boolean => Style::default().fg(Color::Cyan),
+                    polars::datatypes::DataType::String => Style::default().fg(Color::Yellow),
+                    polars::datatypes::DataType::Date
+                    | polars::datatypes::DataType::Datetime(_, _)
+                    | polars::datatypes::DataType::Time => Style::default().fg(Color::Green),
+                    polars::datatypes::DataType::Null => Style::default().fg(Color::DarkGray),
+                    _ => Style::default().fg(Color::White),
+                };
+                cells.push(Cell::from(value).style(style));
             }
             rows.push(Row::new(cells));
         }

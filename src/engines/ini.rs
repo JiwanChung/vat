@@ -85,28 +85,45 @@ impl IniEngine {
 
                 match parsed {
                     IniLine::Section(name) => {
-                        let style = if selected {
+                        let bracket_style = if selected {
+                            Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else {
+                            Style::default().fg(Color::Magenta)
+                        };
+                        let name_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightCyan).bold()
+                            Style::default().fg(Color::Magenta).bold()
                         };
-                        spans.push(Span::styled(format!("[{}]", name), style));
+                        spans.push(Span::styled("[", bracket_style));
+                        spans.push(Span::styled(name.clone(), name_style));
+                        spans.push(Span::styled("]", bracket_style));
                     }
                     IniLine::KeyValue { key, value } => {
                         let key_style = if selected {
-                            Style::default().fg(Color::Black).bg(Color::LightBlue)
+                            Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                         } else {
-                            Style::default().fg(Color::LightGreen)
+                            Style::default().fg(Color::White).bold()
                         };
                         let eq_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::White)
+                            Style::default().fg(Color::DarkGray)
                         };
+                        // Smart value coloring based on content
                         let val_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::LightYellow)
+                            let v = value.to_lowercase();
+                            if v == "true" || v == "false" || v == "yes" || v == "no" || v == "on" || v == "off" {
+                                Style::default().fg(Color::Cyan)
+                            } else if value.parse::<f64>().is_ok() {
+                                Style::default().fg(Color::Magenta)
+                            } else if value.starts_with('/') || value.starts_with("~/") || value.contains("://") {
+                                Style::default().fg(Color::Green)
+                            } else {
+                                Style::default().fg(Color::Yellow)
+                            }
                         };
                         spans.push(Span::styled(key.clone(), key_style));
                         spans.push(Span::styled(" = ", eq_style));
@@ -116,7 +133,7 @@ impl IniEngine {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(Color::DarkGray).italic()
                         };
                         spans.push(Span::styled(text.clone(), style));
                     }
