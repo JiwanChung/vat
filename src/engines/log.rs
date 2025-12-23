@@ -36,6 +36,8 @@ pub struct LogEngine {
     last_view_height: usize,
     last_match: Option<String>,
     filter_level: Option<LogLevel>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl LogEngine {
@@ -59,6 +61,7 @@ impl LogEngine {
             last_view_height: 0,
             last_match: None,
             filter_level: None,
+            visual_range: None,
         })
     }
 
@@ -285,6 +288,26 @@ impl LogEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.entries.get(self.selection).map(|(_, entry)| entry.raw.clone())
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.entries.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.entries[start..=end].iter().map(|(_, entry)| entry.raw.clone()).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

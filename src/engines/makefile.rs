@@ -19,7 +19,8 @@ enum MakeLine {
 }
 
 pub struct MakefileEngine {
-    lines: Vec<(usize, MakeLine)>,
+    lines: Vec<(usize, String, MakeLine)>,  // (line_no, raw, parsed)
+    #[allow(dead_code)]
     phony_targets: Vec<String>,
     selection: usize,
     scroll: usize,
@@ -28,6 +29,8 @@ pub struct MakefileEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl MakefileEngine {
@@ -51,6 +54,7 @@ impl MakefileEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -71,7 +75,7 @@ impl MakefileEngine {
             .skip(self.scroll)
             .take(height)
             .enumerate()
-            .map(|(idx, (line_no, parsed))| {
+            .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
 
@@ -208,7 +212,7 @@ impl MakefileEngine {
             KeyCode::Char('e') => {
                 // Jump to next target
                 for i in (self.selection + 1)..total {
-                    if matches!(self.lines[i].1, MakeLine::Target { .. }) {
+                    if matches!(self.lines[i].2, MakeLine::Target { .. }) {
                         self.selection = i;
                         break;
                     }
@@ -250,7 +254,7 @@ impl MakefileEngine {
         // Find current target
         let mut target = "".to_string();
         for i in (0..=self.selection).rev() {
-            if let MakeLine::Target { name, .. } = &self.lines[i].1 {
+            if let MakeLine::Target { name, .. } = &self.lines[i].2 {
                 target = name.clone();
                 break;
             }
@@ -279,6 +283,26 @@ impl MakefileEngine {
         None
     }
 
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.lines.get(self.selection).map(|(_, raw, _)| raw.clone())
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.lines.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.lines[start..=end].iter().map(|(_, raw, _)| raw.clone()).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
+    }
+
     pub fn content_height(&self) -> usize {
         self.lines.len()
     }
@@ -287,7 +311,7 @@ impl MakefileEngine {
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
         self.lines
             .iter()
-            .map(|(line_no, parsed)| {
+            .map(|(line_no, _raw, parsed)| {
                 let mut spans = Vec::new();
                 spans.push(Span::styled(
                     format!("{:>width$} ", line_no, width = line_no_width),
@@ -341,7 +365,7 @@ impl MakefileEngine {
             } else {
                 (start + total - offset % total) % total
             };
-            let text = match &self.lines[idx].1 {
+            let text = match &self.lines[idx].2 {
                 MakeLine::Target { name, deps, .. } => format!("{}: {}", name, deps.join(" ")),
                 MakeLine::Recipe(cmd) => cmd.clone(),
                 MakeLine::Variable { name, op, value } => format!("{} {} {}", name, op, value),
@@ -359,27 +383,28 @@ impl MakefileEngine {
     }
 }
 
-fn parse_makefile(content: &str) -> (Vec<(usize, MakeLine)>, Vec<String>) {
+fn parse_makefile(content: &str) -> (Vec<(usize, String, MakeLine)>, Vec<String>) {
     let mut lines = Vec::new();
     let mut phony_targets = Vec::new();
 
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
+        let raw = line.to_string();
         let trimmed = line.trim();
 
         if trimmed.is_empty() {
-            lines.push((line_no, MakeLine::Empty));
+            lines.push((line_no, raw, MakeLine::Empty));
             continue;
         }
 
         if trimmed.starts_with('#') {
-            lines.push((line_no, MakeLine::Comment(trimmed.to_string())));
+            lines.push((line_no, raw, MakeLine::Comment(trimmed.to_string())));
             continue;
         }
 
         // Recipe line (starts with tab)
         if line.starts_with('\t') {
-            lines.push((line_no, MakeLine::Recipe(line[1..].to_string())));
+            lines.push((line_no, raw, MakeLine::Recipe(line[1..].to_string())));
             continue;
         }
 
@@ -390,14 +415,14 @@ fn parse_makefile(content: &str) -> (Vec<(usize, MakeLine)>, Vec<String>) {
                 .map(|s| s.to_string())
                 .collect();
             phony_targets.extend(targets);
-            lines.push((line_no, MakeLine::Comment(trimmed.to_string())));
+            lines.push((line_no, raw, MakeLine::Comment(trimmed.to_string())));
             continue;
         }
 
         // Include
         if trimmed.starts_with("include ") || trimmed.starts_with("-include ") {
             let path = trimmed.split_whitespace().nth(1).unwrap_or("").to_string();
-            lines.push((line_no, MakeLine::Include(path)));
+            lines.push((line_no, raw, MakeLine::Include(path)));
             continue;
         }
 
@@ -409,22 +434,27 @@ fn parse_makefile(content: &str) -> (Vec<(usize, MakeLine)>, Vec<String>) {
             || trimmed.starts_with("else")
             || trimmed.starts_with("endif")
         {
-            lines.push((line_no, MakeLine::Conditional(trimmed.to_string())));
+            lines.push((line_no, raw, MakeLine::Conditional(trimmed.to_string())));
             continue;
         }
 
         // Variable assignment
+        let mut matched_var = false;
         for op in &[":=", "?=", "+=", "="] {
             if let Some(pos) = trimmed.find(op) {
                 let name = trimmed[..pos].trim().to_string();
                 let value = trimmed[pos + op.len()..].trim().to_string();
-                lines.push((line_no, MakeLine::Variable {
+                lines.push((line_no, raw.clone(), MakeLine::Variable {
                     name,
                     op: op.to_string(),
                     value,
                 }));
-                continue;
+                matched_var = true;
+                break;
             }
+        }
+        if matched_var {
+            continue;
         }
 
         // Target
@@ -437,17 +467,17 @@ fn parse_makefile(content: &str) -> (Vec<(usize, MakeLine)>, Vec<String>) {
                     .map(|s| s.to_string())
                     .collect();
                 let is_phony = phony_targets.contains(&name);
-                lines.push((line_no, MakeLine::Target { name, deps, is_phony }));
+                lines.push((line_no, raw, MakeLine::Target { name, deps, is_phony }));
                 continue;
             }
         }
 
         // Fallback
-        lines.push((line_no, MakeLine::Comment(trimmed.to_string())));
+        lines.push((line_no, raw, MakeLine::Comment(trimmed.to_string())));
     }
 
     // Update phony status after full parse
-    for (_, line) in lines.iter_mut() {
+    for (_, _, line) in lines.iter_mut() {
         if let MakeLine::Target { name, is_phony, .. } = line {
             *is_phony = phony_targets.contains(name);
         }

@@ -20,6 +20,8 @@ pub struct LogicEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl LogicEngine {
@@ -48,6 +50,7 @@ impl LogicEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -216,6 +219,28 @@ impl LogicEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.lines.get(self.selection).cloned()
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.lines.len();
+        if start >= total {
+            return None;
+        }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.lines[start..=end].to_vec();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 }
 

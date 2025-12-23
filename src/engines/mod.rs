@@ -137,6 +137,31 @@ impl EngineState {
         }
     }
 
+    /// Set visual selection range for highlighting
+    pub fn set_visual_range(&mut self, range: Option<(usize, usize)>) {
+        match self {
+            EngineState::Tree(engine) => engine.visual_range = range,
+            EngineState::Table(engine) => engine.visual_range = range,
+            EngineState::Logic(engine) => engine.visual_range = range,
+            EngineState::Syntax(engine) => engine.visual_range = range,
+            EngineState::Html(engine) => engine.visual_range = range,
+            EngineState::Lock(engine) => engine.visual_range = range,
+            EngineState::Jsonl(engine) => engine.visual_range = range,
+            EngineState::Text(engine) => engine.visual_range = range,
+            EngineState::Env(engine) => engine.visual_range = range,
+            EngineState::Ini(engine) => engine.visual_range = range,
+            EngineState::Xml(engine) => engine.visual_range = range,
+            EngineState::Dockerfile(engine) => engine.visual_range = range,
+            EngineState::Makefile(engine) => engine.visual_range = range,
+            EngineState::Log(engine) => engine.visual_range = range,
+            EngineState::GitIgnore(engine) => engine.visual_range = range,
+            EngineState::Sqlite(engine) => engine.visual_range = range,
+            EngineState::Archive(engine) => engine.visual_range = range,
+            EngineState::Image(engine) => engine.visual_range = range,
+            EngineState::Hex(engine) => engine.visual_range = range,
+        }
+    }
+
     pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         match self {
             EngineState::Tree(engine) => engine.render(frame, area),
@@ -282,6 +307,7 @@ impl EngineState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         match self {
             EngineState::Tree(engine) => engine.selected_path(),
@@ -291,6 +317,81 @@ impl EngineState {
             EngineState::Image(engine) => engine.selected_path(),
             EngineState::Hex(engine) => engine.selected_path(),
             _ => None,
+        }
+    }
+
+    /// Get the content of the currently selected line/row
+    pub fn get_selected_line(&self) -> Option<String> {
+        match self {
+            EngineState::Text(engine) => engine.get_selected_line(),
+            EngineState::Syntax(engine) => engine.get_selected_line(),
+            EngineState::Tree(engine) => engine.get_selected_line(),
+            EngineState::Table(engine) => engine.get_selected_line(),
+            EngineState::Logic(engine) => engine.get_selected_line(),
+            EngineState::Html(engine) => engine.get_selected_line(),
+            EngineState::Lock(engine) => engine.get_selected_line(),
+            EngineState::Jsonl(engine) => engine.get_selected_line(),
+            EngineState::Env(engine) => engine.get_selected_line(),
+            EngineState::Ini(engine) => engine.get_selected_line(),
+            EngineState::Xml(engine) => engine.get_selected_line(),
+            EngineState::Dockerfile(engine) => engine.get_selected_line(),
+            EngineState::Makefile(engine) => engine.get_selected_line(),
+            EngineState::Log(engine) => engine.get_selected_line(),
+            EngineState::GitIgnore(engine) => engine.get_selected_line(),
+            EngineState::Sqlite(engine) => engine.get_selected_line(),
+            EngineState::Archive(engine) => engine.get_selected_line(),
+            EngineState::Image(engine) => engine.get_selected_line(),
+            EngineState::Hex(engine) => engine.get_selected_line(),
+        }
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        match self {
+            EngineState::Text(engine) => engine.get_lines_range(start, end),
+            EngineState::Syntax(engine) => engine.get_lines_range(start, end),
+            EngineState::Tree(engine) => engine.get_lines_range(start, end),
+            EngineState::Table(engine) => engine.get_lines_range(start, end),
+            EngineState::Logic(engine) => engine.get_lines_range(start, end),
+            EngineState::Html(engine) => engine.get_lines_range(start, end),
+            EngineState::Lock(engine) => engine.get_lines_range(start, end),
+            EngineState::Jsonl(engine) => engine.get_lines_range(start, end),
+            EngineState::Env(engine) => engine.get_lines_range(start, end),
+            EngineState::Ini(engine) => engine.get_lines_range(start, end),
+            EngineState::Xml(engine) => engine.get_lines_range(start, end),
+            EngineState::Dockerfile(engine) => engine.get_lines_range(start, end),
+            EngineState::Makefile(engine) => engine.get_lines_range(start, end),
+            EngineState::Log(engine) => engine.get_lines_range(start, end),
+            EngineState::GitIgnore(engine) => engine.get_lines_range(start, end),
+            EngineState::Sqlite(engine) => engine.get_lines_range(start, end),
+            EngineState::Archive(engine) => engine.get_lines_range(start, end),
+            EngineState::Image(engine) => engine.get_lines_range(start, end),
+            EngineState::Hex(engine) => engine.get_lines_range(start, end),
+        }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        match self {
+            EngineState::Text(engine) => engine.selection(),
+            EngineState::Syntax(engine) => engine.selection(),
+            EngineState::Tree(engine) => engine.selection(),
+            EngineState::Table(engine) => engine.selection(),
+            EngineState::Logic(engine) => engine.selection(),
+            EngineState::Html(engine) => engine.selection(),
+            EngineState::Lock(engine) => engine.selection(),
+            EngineState::Jsonl(engine) => engine.selection(),
+            EngineState::Env(engine) => engine.selection(),
+            EngineState::Ini(engine) => engine.selection(),
+            EngineState::Xml(engine) => engine.selection(),
+            EngineState::Dockerfile(engine) => engine.selection(),
+            EngineState::Makefile(engine) => engine.selection(),
+            EngineState::Log(engine) => engine.selection(),
+            EngineState::GitIgnore(engine) => engine.selection(),
+            EngineState::Sqlite(engine) => engine.selection(),
+            EngineState::Archive(engine) => engine.selection(),
+            EngineState::Image(engine) => engine.selection(),
+            EngineState::Hex(engine) => engine.selection(),
         }
     }
 

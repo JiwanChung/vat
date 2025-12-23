@@ -26,6 +26,8 @@ pub struct EnvEngine {
     last_view_height: usize,
     last_match: Option<String>,
     show_secrets: bool,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl EnvEngine {
@@ -49,6 +51,7 @@ impl EnvEngine {
             last_view_height: 0,
             last_match: None,
             show_secrets: false,
+            visual_range: None,
         })
     }
 
@@ -223,6 +226,44 @@ impl EnvEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        if self.selection == 0 {
+            Some("Category\tKey\tValue".to_string())
+        } else {
+            self.entries.get(self.selection.saturating_sub(1)).map(|e| {
+                let value = if self.show_secrets || !e.is_secret { &e.value } else { "********" };
+                format!("{}\t{}\t{}", e.category, e.key, value)
+            })
+        }
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.entries.len() + 1;
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = (start..=end)
+            .filter_map(|idx| {
+                if idx == 0 {
+                    Some("Category\tKey\tValue".to_string())
+                } else {
+                    self.entries.get(idx.saturating_sub(1)).map(|e| {
+                        let value = if self.show_secrets || !e.is_secret { &e.value } else { "********" };
+                        format!("{}\t{}\t{}", e.category, e.key, value)
+                    })
+                }
+            })
+            .collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

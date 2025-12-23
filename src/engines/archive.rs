@@ -15,6 +15,7 @@ struct ArchiveEntry {
     size: u64,
     compressed_size: Option<u64>,
     is_dir: bool,
+    #[allow(dead_code)]
     modified: Option<String>,
 }
 
@@ -30,6 +31,8 @@ pub struct ArchiveEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl ArchiveEngine {
@@ -70,6 +73,7 @@ impl ArchiveEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -250,6 +254,30 @@ impl ArchiveEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         self.entries.get(self.selection).map(|e| e.path.clone())
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.entries.get(self.selection).map(|e| {
+            format!("{}\t{}\t{}", e.path, format_size(e.size), format_size(e.compressed_size.unwrap_or(e.size)))
+        })
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.entries.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.entries[start..=end].iter().map(|e| {
+            format!("{}\t{}\t{}", e.path, format_size(e.size), format_size(e.compressed_size.unwrap_or(e.size)))
+        }).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

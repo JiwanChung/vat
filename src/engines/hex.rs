@@ -23,6 +23,8 @@ pub struct HexEngine {
     last_view_height: usize,
     cached_lines: Vec<(usize, Vec<u8>)>,
     cache_start: usize,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl HexEngine {
@@ -47,6 +49,7 @@ impl HexEngine {
             last_view_height: 0,
             cached_lines: Vec::new(),
             cache_start: 0,
+            visual_range: None,
         })
     }
 
@@ -262,6 +265,61 @@ impl HexEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        let offset = self.selection * BYTES_PER_LINE;
+        if offset >= self.file_size as usize {
+            return None;
+        }
+        // Read the bytes for this line
+        if let Ok(mut file) = File::open(&self.file_path) {
+            use std::io::{Seek, SeekFrom, Read};
+            if file.seek(SeekFrom::Start(offset as u64)).is_ok() {
+                let mut buffer = vec![0u8; BYTES_PER_LINE];
+                if let Ok(read) = file.read(&mut buffer) {
+                    buffer.truncate(read);
+                    let hex: String = buffer.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+                    let ascii: String = buffer.iter().map(|&b| if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' }).collect();
+                    return Some(format!("{:08X}: {} | {}", offset, hex, ascii));
+                }
+            }
+        }
+        None
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.total_lines();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+
+        if let Ok(mut file) = File::open(&self.file_path) {
+            use std::io::{Seek, SeekFrom, Read};
+            let start_offset = start * BYTES_PER_LINE;
+            if file.seek(SeekFrom::Start(start_offset as u64)).is_ok() {
+                let byte_count = (end - start + 1) * BYTES_PER_LINE;
+                let mut buffer = vec![0u8; byte_count];
+                if let Ok(read) = file.read(&mut buffer) {
+                    buffer.truncate(read);
+                    let lines: Vec<String> = buffer.chunks(BYTES_PER_LINE).enumerate().map(|(i, chunk)| {
+                        let offset = (start + i) * BYTES_PER_LINE;
+                        let hex: String = chunk.iter().map(|b| format!("{:02X}", b)).collect::<Vec<_>>().join(" ");
+                        let ascii: String = chunk.iter().map(|&b| if b.is_ascii_graphic() || b == b' ' { b as char } else { '.' }).collect();
+                        format!("{:08X}: {} | {}", offset, hex, ascii)
+                    }).collect();
+                    return Some(lines.join("\n"));
+                }
+            }
+        }
+        None
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

@@ -19,7 +19,7 @@ enum DockerLine {
 }
 
 pub struct DockerfileEngine {
-    lines: Vec<(usize, DockerLine)>,
+    lines: Vec<(usize, String, DockerLine)>,  // (line_no, raw, parsed)
     selection: usize,
     scroll: usize,
     file_name: String,
@@ -27,6 +27,8 @@ pub struct DockerfileEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl DockerfileEngine {
@@ -49,6 +51,7 @@ impl DockerfileEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -69,7 +72,7 @@ impl DockerfileEngine {
             .skip(self.scroll)
             .take(height)
             .enumerate()
-            .map(|(idx, (line_no, parsed))| {
+            .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
 
@@ -211,7 +214,7 @@ impl DockerfileEngine {
             KeyCode::Char('e') => {
                 // Jump to next FROM (stage)
                 for i in (self.selection + 1)..total {
-                    if matches!(self.lines[i].1, DockerLine::From { .. }) {
+                    if matches!(self.lines[i].2, DockerLine::From { .. }) {
                         self.selection = i;
                         break;
                     }
@@ -253,7 +256,7 @@ impl DockerfileEngine {
         // Find current stage
         let mut stage = 0;
         for i in (0..=self.selection).rev() {
-            if let DockerLine::From { stage_num, .. } = &self.lines[i].1 {
+            if let DockerLine::From { stage_num, .. } = &self.lines[i].2 {
                 stage = *stage_num;
                 break;
             }
@@ -278,6 +281,26 @@ impl DockerfileEngine {
         None
     }
 
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.lines.get(self.selection).map(|(_, raw, _)| raw.clone())
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.lines.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.lines[start..=end].iter().map(|(_, raw, _)| raw.clone()).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
+    }
+
     pub fn content_height(&self) -> usize {
         self.lines.len()
     }
@@ -286,7 +309,7 @@ impl DockerfileEngine {
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
         self.lines
             .iter()
-            .map(|(line_no, parsed)| {
+            .map(|(line_no, _raw, parsed)| {
                 let mut spans = Vec::new();
                 spans.push(Span::styled(
                     format!("{:>width$} ", line_no, width = line_no_width),
@@ -334,7 +357,7 @@ impl DockerfileEngine {
             } else {
                 (start + total - offset % total) % total
             };
-            let text = match &self.lines[idx].1 {
+            let text = match &self.lines[idx].2 {
                 DockerLine::From { image, alias, .. } => {
                     format!("FROM {} {}", image, alias.as_deref().unwrap_or(""))
                 }
@@ -356,7 +379,8 @@ impl DockerfileEngine {
     }
 }
 
-fn parse_dockerfile(content: &str) -> Vec<(usize, DockerLine)> {
+
+fn parse_dockerfile(content: &str) -> Vec<(usize, String, DockerLine)> {
     let mut lines = Vec::new();
     let mut stage_num = 0;
     let mut continued_line = String::new();
@@ -392,13 +416,15 @@ fn parse_dockerfile(content: &str) -> Vec<(usize, DockerLine)> {
             line_no
         };
 
+        let raw = full_line.clone();
+
         if full_line.is_empty() {
-            lines.push((effective_line_no, DockerLine::Empty));
+            lines.push((effective_line_no, raw, DockerLine::Empty));
             continue;
         }
 
         if full_line.starts_with('#') {
-            lines.push((effective_line_no, DockerLine::Comment(full_line)));
+            lines.push((effective_line_no, raw, DockerLine::Comment(full_line)));
             continue;
         }
 
@@ -416,41 +442,41 @@ fn parse_dockerfile(content: &str) -> Vec<(usize, DockerLine)> {
                 } else {
                     (args, None)
                 };
-                lines.push((effective_line_no, DockerLine::From { image, alias, stage_num }));
+                lines.push((effective_line_no, raw, DockerLine::From { image, alias, stage_num }));
             }
             "ARG" => {
                 if let Some(eq_pos) = args.find('=') {
                     let name = args[..eq_pos].trim().to_string();
                     let default = Some(args[eq_pos + 1..].trim().to_string());
-                    lines.push((effective_line_no, DockerLine::Arg { name, default }));
+                    lines.push((effective_line_no, raw, DockerLine::Arg { name, default }));
                 } else {
-                    lines.push((effective_line_no, DockerLine::Arg { name: args, default: None }));
+                    lines.push((effective_line_no, raw, DockerLine::Arg { name: args, default: None }));
                 }
             }
             "ENV" => {
                 if let Some(eq_pos) = args.find('=') {
                     let key = args[..eq_pos].trim().to_string();
                     let value = args[eq_pos + 1..].trim().to_string();
-                    lines.push((effective_line_no, DockerLine::Env { key, value }));
+                    lines.push((effective_line_no, raw, DockerLine::Env { key, value }));
                 } else if let Some(space_pos) = args.find(' ') {
                     let key = args[..space_pos].trim().to_string();
                     let value = args[space_pos + 1..].trim().to_string();
-                    lines.push((effective_line_no, DockerLine::Env { key, value }));
+                    lines.push((effective_line_no, raw, DockerLine::Env { key, value }));
                 } else {
-                    lines.push((effective_line_no, DockerLine::Instruction { cmd, args }));
+                    lines.push((effective_line_no, raw, DockerLine::Instruction { cmd, args }));
                 }
             }
             "LABEL" => {
                 if let Some(eq_pos) = args.find('=') {
                     let key = args[..eq_pos].trim().to_string();
                     let value = args[eq_pos + 1..].trim().trim_matches('"').to_string();
-                    lines.push((effective_line_no, DockerLine::Label { key, value }));
+                    lines.push((effective_line_no, raw, DockerLine::Label { key, value }));
                 } else {
-                    lines.push((effective_line_no, DockerLine::Instruction { cmd, args }));
+                    lines.push((effective_line_no, raw, DockerLine::Instruction { cmd, args }));
                 }
             }
             _ => {
-                lines.push((effective_line_no, DockerLine::Instruction { cmd, args }));
+                lines.push((effective_line_no, raw, DockerLine::Instruction { cmd, args }));
             }
         }
     }

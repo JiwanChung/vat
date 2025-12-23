@@ -23,6 +23,8 @@ pub struct TableEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl TableEngine {
@@ -67,6 +69,7 @@ impl TableEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -243,6 +246,63 @@ impl TableEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected row
+    pub fn get_selected_line(&self) -> Option<String> {
+        if self.schema_view {
+            self.df.schema().iter_fields().nth(self.selection).map(|f| {
+                format!("{}: {}", f.name(), f.data_type())
+            })
+        } else if self.selection == 0 {
+            // Header row
+            Some(self.df.get_column_names().join("\t"))
+        } else {
+            let row_idx = self.selection.saturating_sub(1);
+            if row_idx < self.df.height() {
+                let values: Vec<String> = self.df.get_columns().iter().map(|col| {
+                    col.get(row_idx).map(|v| format!("{}", v)).unwrap_or_default()
+                }).collect();
+                Some(values.join("\t"))
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Get rows in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.content_height();
+        if start >= total {
+            return None;
+        }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = (start..=end)
+            .filter_map(|idx| {
+                if self.schema_view {
+                    self.df.schema().iter_fields().nth(idx).map(|f| format!("{}: {}", f.name(), f.data_type()))
+                } else if idx == 0 {
+                    Some(self.df.get_column_names().join("\t"))
+                } else {
+                    let row_idx = idx.saturating_sub(1);
+                    if row_idx < self.df.height() {
+                        let values: Vec<String> = self.df.get_columns().iter().map(|col| {
+                            col.get(row_idx).map(|v| format!("{}", v)).unwrap_or_default()
+                        }).collect();
+                        Some(values.join("\t"))
+                    } else {
+                        None
+                    }
+                }
+            })
+            .collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     fn render_table(&mut self, frame: &mut ratatui::Frame, area: Rect) {

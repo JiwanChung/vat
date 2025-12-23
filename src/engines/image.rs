@@ -33,6 +33,8 @@ pub struct ImageEngine {
     last_query: Option<String>,
     pending_g: bool,
     last_view_height: usize,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl ImageEngine {
@@ -80,6 +82,7 @@ impl ImageEngine {
             last_query: None,
             pending_g: false,
             last_view_height: 0,
+            visual_range: None,
         })
     }
 
@@ -207,6 +210,28 @@ impl ImageEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.lines.get(self.selection).map(|line| {
+            format!("{}: {}", line.label, line.value)
+        })
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.lines.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.lines[start..=end].iter().map(|line| format!("{}: {}", line.label, line.value)).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

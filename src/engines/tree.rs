@@ -32,6 +32,7 @@ struct Node {
 }
 
 struct FlatNode {
+    arena_idx: usize,
     depth: usize,
     copy_path: String,
     breadcrumb: String,
@@ -51,6 +52,8 @@ pub struct TreeEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl TreeEngine {
@@ -98,6 +101,7 @@ impl TreeEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         };
         engine.rebuild_flat();
         Ok(engine)
@@ -125,12 +129,21 @@ impl TreeEngine {
             .skip(self.scroll)
             .take(height)
             .map(|(idx, flat)| {
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    idx >= lo && idx <= hi
+                });
+                let selected = idx == self.selection;
                 let mut spans = Vec::new();
                 let line_no = format!("{:>width$} ", idx + 1, width = line_no_width);
-                spans.push(Span::styled(
-                    line_no,
-                    Style::default().fg(Color::LightYellow),
-                ));
+                let line_no_style = if selected {
+                    Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
+                } else {
+                    Style::default().fg(Color::LightYellow)
+                };
+                spans.push(Span::styled(line_no, line_no_style));
                 spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
                 let indent = "  ".repeat(flat.depth);
                 spans.push(Span::raw(indent));
@@ -155,7 +168,11 @@ impl TreeEngine {
                         Style::default().fg(Color::LightGreen),
                     ));
                 }
-                ListItem::new(Line::from(spans))
+                let mut item = ListItem::new(Line::from(spans));
+                if in_visual && !selected {
+                    item = item.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+                }
+                item
             })
             .collect();
 
@@ -322,8 +339,83 @@ impl TreeEngine {
         self.last_query = None;
     }
 
+    #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         self.flat.get(self.selection).map(|f| f.copy_path.clone())
+    }
+
+    /// Get the content of the currently selected node as JSON
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.flat.get(self.selection).map(|f| {
+            self.node_to_json(f.arena_idx)
+        })
+    }
+
+    /// Get lines in a range (inclusive) - for tree, we serialize top-level nodes to JSON
+    /// If a container and its children are selected, only the container is included
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.flat.len();
+        if start >= total {
+            return None;
+        }
+        let end = end.min(total.saturating_sub(1));
+
+        let mut results = Vec::new();
+        let mut skip_depth: Option<usize> = None;
+
+        for idx in start..=end {
+            if let Some(f) = self.flat.get(idx) {
+                // If we're skipping children of a container, check depth
+                if let Some(parent_depth) = skip_depth {
+                    if f.depth > parent_depth {
+                        continue; // Skip this child
+                    } else {
+                        skip_depth = None; // No longer a child, reset
+                    }
+                }
+
+                results.push(self.node_to_json(f.arena_idx));
+
+                // If this is a container, skip its children
+                if f.is_container {
+                    skip_depth = Some(f.depth);
+                }
+            }
+        }
+
+        if results.is_empty() { None } else { Some(results.join("\n")) }
+    }
+
+    /// Serialize a node to JSON string
+    fn node_to_json(&self, idx: usize) -> String {
+        let node = &self.arena[idx];
+        match &node.kind {
+            NodeKind::Null => "null".to_string(),
+            NodeKind::Bool(b) => b.to_string(),
+            NodeKind::Number(n) => n.clone(),
+            NodeKind::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            NodeKind::Object => {
+                let pairs: Vec<String> = node.children.iter().map(|&child_idx| {
+                    let child = &self.arena[child_idx];
+                    let key = &child.label;
+                    let value = self.node_to_json(child_idx);
+                    format!("\"{}\": {}", key, value)
+                }).collect();
+                format!("{{{}}}", pairs.join(", "))
+            }
+            NodeKind::Array => {
+                let items: Vec<String> = node.children.iter().map(|&child_idx| {
+                    self.node_to_json(child_idx)
+                }).collect();
+                format!("[{}]", items.join(", "))
+            }
+        }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     fn rebuild_flat(&mut self) {
@@ -356,6 +448,7 @@ impl TreeEngine {
         };
 
         self.flat.push(FlatNode {
+            arena_idx: index,
             depth,
             copy_path,
             breadcrumb,

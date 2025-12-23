@@ -28,6 +28,8 @@ pub struct XmlEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl XmlEngine {
@@ -51,6 +53,7 @@ impl XmlEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -279,6 +282,58 @@ impl XmlEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        let visible = self.visible_nodes();
+        visible.get(self.selection).map(|&node_idx| {
+            let node = &self.nodes[node_idx];
+            let text = node.text.as_deref().unwrap_or("");
+            format!("<{}> {}", node.tag, text)
+        })
+    }
+
+    /// Get lines in a range (inclusive), skipping children of selected parents
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let visible = self.visible_nodes();
+        let total = visible.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+
+        let mut results = Vec::new();
+        let mut skip_depth: Option<usize> = None;
+
+        for idx in start..=end {
+            if let Some(&node_idx) = visible.get(idx) {
+                let node = &self.nodes[node_idx];
+
+                // Skip children of already-selected parent
+                if let Some(parent_depth) = skip_depth {
+                    if node.depth > parent_depth {
+                        continue;
+                    } else {
+                        skip_depth = None;
+                    }
+                }
+
+                let text = node.text.as_deref().unwrap_or("");
+                results.push(format!("<{}> {}", node.tag, text));
+
+                // If this node has children, skip them
+                if node.has_children {
+                    skip_depth = Some(node.depth);
+                }
+            }
+        }
+
+        if results.is_empty() { None } else { Some(results.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

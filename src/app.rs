@@ -42,6 +42,10 @@ pub struct App {
     filter: Option<String>,
     /// Show help overlay
     show_help: bool,
+    /// Visual line mode: stores the starting selection index
+    visual_start: Option<usize>,
+    /// Track if 'y' was pressed (for 'yy' detection)
+    pending_y: bool,
 }
 
 impl App {
@@ -67,6 +71,8 @@ impl App {
             force_raw,
             filter: None,
             show_help: false,
+            visual_start: None,
+            pending_y: false,
         }
     }
 
@@ -192,6 +198,56 @@ impl App {
             return;
         }
 
+        // Handle visual mode
+        if self.visual_start.is_some() {
+            match key.code {
+                KeyCode::Esc => {
+                    self.visual_start = None;
+                    self.status = Some("Visual mode cancelled".to_string());
+                }
+                KeyCode::Char('y') => {
+                    // Copy selection in visual mode
+                    if let Some(start) = self.visual_start {
+                        let end = self.engine.selection();
+                        if let Some(content) = self.engine.get_lines_range(start, end) {
+                            if let Ok(mut clipboard) = Clipboard::new() {
+                                let line_count = if start <= end { end - start + 1 } else { start - end + 1 };
+                                if clipboard.set_text(content).is_ok() {
+                                    self.status = Some(format!("Yanked {} line(s)", line_count));
+                                }
+                            }
+                        }
+                        self.visual_start = None;
+                    }
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    self.engine.handle_key(key);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.engine.handle_key(key);
+                }
+                KeyCode::Char('G') => {
+                    self.engine.handle_key(key);
+                }
+                KeyCode::Char('g') => {
+                    self.engine.handle_key(key);
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.engine.handle_key(key);
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    self.engine.handle_key(key);
+                }
+                _ => {}
+            }
+            return;
+        }
+
+        // Reset pending_y for non-y keys
+        if key.code != KeyCode::Char('y') {
+            self.pending_y = false;
+        }
+
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -200,13 +256,25 @@ impl App {
                 self.show_help = true;
             }
             KeyCode::Char('y') => {
-                if let Some(path) = self.engine.selected_path() {
-                    if let Ok(mut clipboard) = Clipboard::new() {
-                        if clipboard.set_text(path.clone()).is_ok() {
-                            self.status = Some(format!("Copied path: {}", path));
+                if self.pending_y {
+                    // yy: copy current line
+                    if let Some(line) = self.engine.get_selected_line() {
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            if clipboard.set_text(line).is_ok() {
+                                self.status = Some("Yanked 1 line".to_string());
+                            }
                         }
                     }
+                    self.pending_y = false;
+                } else {
+                    // First 'y' press - wait for second 'y' or copy path for tree
+                    self.pending_y = true;
                 }
+            }
+            KeyCode::Char('v') => {
+                // Enter visual line mode
+                self.visual_start = Some(self.engine.selection());
+                self.status = Some("-- VISUAL LINE --".to_string());
             }
             KeyCode::Char('/') => {
                 if self.engine.supports_search() {
@@ -241,12 +309,13 @@ impl App {
         let area = outer.inner(frame.size());
         frame.render_widget(outer, frame.size());
 
+        let footer_height = if self.input.active { 2 } else { 1 };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3),
                 Constraint::Min(1),
-                Constraint::Length(1),
+                Constraint::Length(footer_height),
             ])
             .split(area);
 
@@ -261,29 +330,111 @@ impl App {
             .border_style(Style::default().fg(ratatui::style::Color::LightBlue));
         frame.render_widget(Paragraph::new(header).block(header_block), chunks[0]);
 
+        // Set visual range for highlighting
+        if let Some(start) = self.visual_start {
+            let end = self.engine.selection();
+            self.engine.set_visual_range(Some((start, end)));
+        } else {
+            self.engine.set_visual_range(None);
+        }
+
         self.engine.render(frame, chunks[1]);
 
-        let status_text = if self.input.active {
-            let prompt = if self.input.is_filter { "Filter" } else { "Search" };
-            format!("{}: {}_", prompt, self.input.buffer)
-        } else if let Some(status) = self.status.take() {
-            status
+        if self.input.active {
+            // Render search/filter input box
+            let (icon, label) = if self.input.is_filter { ("◉", "Filter") } else { ("⌕", "Search") };
+            let input_line = Line::from(vec![
+                Span::styled(
+                    format!(" {} {} ", icon, label),
+                    Style::default()
+                        .fg(ratatui::style::Color::Black)
+                        .bg(ratatui::style::Color::LightCyan)
+                        .bold(),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(
+                    format!("{}", self.input.buffer),
+                    Style::default()
+                        .fg(ratatui::style::Color::White)
+                        .bold(),
+                ),
+                Span::styled(
+                    "▌",
+                    Style::default()
+                        .fg(ratatui::style::Color::LightCyan),
+                ),
+            ]);
+            let hint = Line::from(vec![
+                Span::styled(
+                    " Enter",
+                    Style::default().fg(ratatui::style::Color::DarkGray),
+                ),
+                Span::styled(" confirm  ", Style::default().fg(ratatui::style::Color::Gray)),
+                Span::styled(
+                    "Esc",
+                    Style::default().fg(ratatui::style::Color::DarkGray),
+                ),
+                Span::styled(" cancel", Style::default().fg(ratatui::style::Color::Gray)),
+            ]);
+            let footer = Paragraph::new(vec![input_line, hint])
+                .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(ratatui::style::Color::LightCyan)));
+            frame.render_widget(footer, chunks[2]);
+        } else if self.visual_start.is_some() {
+            // Render visual mode indicator with styled banner
+            let start = self.visual_start.unwrap();
+            let end = self.engine.selection();
+            let line_count = if start <= end { end - start + 1 } else { start - end + 1 };
+            let range_text = if line_count == 1 {
+                "1 line".to_string()
+            } else {
+                format!("{} lines", line_count)
+            };
+            let visual_line = Line::from(vec![
+                Span::styled(
+                    " ▌ VISUAL ",
+                    Style::default()
+                        .fg(ratatui::style::Color::Black)
+                        .bg(ratatui::style::Color::LightMagenta)
+                        .bold(),
+                ),
+                Span::styled(" ", Style::default()),
+                Span::styled(
+                    range_text,
+                    Style::default()
+                        .fg(ratatui::style::Color::LightMagenta)
+                        .bold(),
+                ),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    "y",
+                    Style::default().fg(ratatui::style::Color::White).bold(),
+                ),
+                Span::styled(" yank  ", Style::default().fg(ratatui::style::Color::Gray)),
+                Span::styled(
+                    "j/k",
+                    Style::default().fg(ratatui::style::Color::White).bold(),
+                ),
+                Span::styled(" extend  ", Style::default().fg(ratatui::style::Color::Gray)),
+                Span::styled(
+                    "Esc",
+                    Style::default().fg(ratatui::style::Color::White).bold(),
+                ),
+                Span::styled(" cancel", Style::default().fg(ratatui::style::Color::Gray)),
+            ]);
+            let footer = Paragraph::new(visual_line)
+                .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(ratatui::style::Color::LightMagenta)));
+            frame.render_widget(footer, chunks[2]);
         } else {
-            self.engine.status_line()
-        };
-
-        let footer_style = if self.input.active {
-            Style::default()
-                .fg(ratatui::style::Color::Black)
-                .bg(ratatui::style::Color::LightYellow)
-                .bold()
-        } else {
-            Style::default().fg(ratatui::style::Color::DarkGray)
-        };
-        let footer = Paragraph::new(status_text)
-            .block(Block::default().borders(Borders::TOP))
-            .style(footer_style);
-        frame.render_widget(footer, chunks[2]);
+            let status_text = if let Some(status) = self.status.take() {
+                status
+            } else {
+                self.engine.status_line()
+            };
+            let footer = Paragraph::new(status_text)
+                .block(Block::default().borders(Borders::TOP))
+                .style(Style::default().fg(ratatui::style::Color::DarkGray));
+            frame.render_widget(footer, chunks[2]);
+        }
 
         // Help overlay
         if self.show_help {
@@ -317,7 +468,8 @@ impl App {
                 Span::styled("Actions", Style::default().bold()),
             ]),
             Line::from("  Enter        Expand/collapse (tree/json)"),
-            Line::from("  y            Copy path (tree view)"),
+            Line::from("  yy           Copy current line"),
+            Line::from("  v            Enter visual line mode"),
             Line::from("  s            Toggle sidebar/schema"),
             Line::from("  e            Next section/heading"),
             Line::from(""),

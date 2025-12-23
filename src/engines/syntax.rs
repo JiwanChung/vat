@@ -39,6 +39,8 @@ pub struct SyntaxEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl SyntaxEngine {
@@ -98,6 +100,7 @@ impl SyntaxEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -287,6 +290,44 @@ impl SyntaxEngine {
         None
     }
 
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        if self.is_markdown {
+            self.md_rendered.get(self.selection).map(|md| md_line_text(md))
+        } else {
+            self.lines.get(self.selection).cloned()
+        }
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        if self.is_markdown {
+            let total = self.md_rendered.len();
+            if start >= total {
+                return None;
+            }
+            let end = end.min(total.saturating_sub(1));
+            let lines: Vec<String> = (start..=end)
+                .filter_map(|idx| self.md_rendered.get(idx).map(|md| md_line_text(md)))
+                .collect();
+            if lines.is_empty() { None } else { Some(lines.join("\n")) }
+        } else {
+            let total = self.lines.len();
+            if start >= total {
+                return None;
+            }
+            let end = end.min(total.saturating_sub(1));
+            let lines: Vec<String> = self.lines[start..=end].to_vec();
+            if lines.is_empty() { None } else { Some(lines.join("\n")) }
+        }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
+    }
+
     fn render_sidebar(&self, frame: &mut ratatui::Frame, area: Rect) {
         let mut lines = Vec::new();
         lines.push(Line::from("Components"));
@@ -335,8 +376,14 @@ impl SyntaxEngine {
             }
             let mut spans = Vec::new();
             let line_no = format!("{:>width$} ", idx + 1, width = line_no_width);
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                idx >= lo && idx <= hi
+            });
             let line_no_style = if idx == self.selection {
                 Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+            } else if in_visual {
+                Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
             } else {
                 Style::default().fg(Color::LightYellow)
             };
@@ -368,6 +415,8 @@ impl SyntaxEngine {
             }
             if idx == self.selection {
                 style = style.bg(Color::LightBlue).fg(Color::Black);
+            } else if in_visual {
+                style = style.bg(Color::LightYellow).fg(Color::Black);
             }
             line_widget = line_widget.style(style);
             output.push(line_widget);

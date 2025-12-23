@@ -36,6 +36,8 @@ pub struct SqliteEngine {
     last_match: Option<String>,
     view_mode: ViewMode,
     db_path: std::path::PathBuf,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -73,6 +75,7 @@ impl SqliteEngine {
             last_match: None,
             view_mode: ViewMode::Schema,
             db_path: path.to_path_buf(),
+            visual_range: None,
         })
     }
 
@@ -357,6 +360,79 @@ impl SqliteEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        match self.view_mode {
+            ViewMode::Schema => {
+                let mut idx = 0;
+                for table in &self.tables {
+                    if idx == self.selection {
+                        return Some(format!("Table: {}", table.name));
+                    }
+                    idx += 1;
+                    for col in &table.columns {
+                        if idx == self.selection {
+                            return Some(format!("{}\t{}\t{}", col.name, col.col_type, if col.is_pk { "PK" } else { "" }));
+                        }
+                        idx += 1;
+                    }
+                    idx += 1; // empty line
+                }
+                None
+            }
+            ViewMode::Preview => {
+                if self.selection == 0 {
+                    self.tables.get(self.current_table).map(|t| {
+                        t.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\t")
+                    })
+                } else {
+                    self.preview_rows.get(self.selection.saturating_sub(1)).map(|row| row.join("\t"))
+                }
+            }
+        }
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.content_height();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = (start..=end)
+            .filter_map(|idx| {
+                // Compute the line at each index inline
+                match self.view_mode {
+                    ViewMode::Schema => {
+                        let mut cur = 0;
+                        for table in &self.tables {
+                            if cur == idx { return Some(format!("Table: {}", table.name)); }
+                            cur += 1;
+                            for col in &table.columns {
+                                if cur == idx { return Some(format!("{}\t{}\t{}", col.name, col.col_type, if col.is_pk { "PK" } else { "" })); }
+                                cur += 1;
+                            }
+                            cur += 1;
+                        }
+                        None
+                    }
+                    ViewMode::Preview => {
+                        if idx == 0 {
+                            self.tables.get(self.current_table).map(|t| t.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\t"))
+                        } else {
+                            self.preview_rows.get(idx.saturating_sub(1)).map(|row| row.join("\t"))
+                        }
+                    }
+                }
+            })
+            .collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

@@ -29,6 +29,8 @@ pub struct JsonlEngine {
     last_match: Option<String>,
     /// Filtered line indices (None = show all)
     filtered_indices: Option<Vec<usize>>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl JsonlEngine {
@@ -55,6 +57,7 @@ impl JsonlEngine {
             last_view_height: 0,
             last_match: None,
             filtered_indices: None,
+            visual_range: None,
         })
     }
 
@@ -397,6 +400,32 @@ impl JsonlEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        let actual_idx = self.display_to_actual(self.selection)?;
+        self.get_line(actual_idx).map(|s| s.to_string())
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.display_count();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = (start..=end)
+            .filter_map(|display_idx| {
+                let actual_idx = self.display_to_actual(display_idx)?;
+                self.get_line(actual_idx).map(|s| s.to_string())
+            })
+            .collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

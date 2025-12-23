@@ -26,6 +26,8 @@ pub struct HtmlEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl HtmlEngine {
@@ -50,6 +52,7 @@ impl HtmlEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -223,6 +226,58 @@ impl HtmlEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        let visible = self.visible_rows();
+        visible.get(self.selection).map(|&idx| {
+            let row = &self.rows[idx];
+            format!("<{}> {} {}", row.tag, row.id, row.text)
+        })
+    }
+
+    /// Get lines in a range (inclusive), skipping children of selected parents
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let visible = self.visible_rows();
+        let total = visible.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+
+        let mut results = Vec::new();
+        let mut skip_depth: Option<usize> = None;
+
+        for idx in start..=end {
+            if let Some(&row_idx) = visible.get(idx) {
+                let row = &self.rows[row_idx];
+
+                // Skip children of already-selected parent
+                if let Some(parent_depth) = skip_depth {
+                    if row.depth > parent_depth {
+                        continue;
+                    } else {
+                        skip_depth = None;
+                    }
+                }
+
+                results.push(format!("<{}> {} {}", row.tag, row.id, row.text));
+
+                // Check if next row is a child (has greater depth)
+                if let Some(&next_row_idx) = visible.get(idx + 1) {
+                    if self.rows[next_row_idx].depth > row.depth {
+                        skip_depth = Some(row.depth);
+                    }
+                }
+            }
+        }
+
+        if results.is_empty() { None } else { Some(results.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {

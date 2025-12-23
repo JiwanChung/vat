@@ -15,7 +15,7 @@ enum GitIgnoreLine {
 }
 
 pub struct GitIgnoreEngine {
-    lines: Vec<(usize, GitIgnoreLine)>,
+    lines: Vec<(usize, String, GitIgnoreLine)>,  // (line_no, raw, parsed)
     selection: usize,
     scroll: usize,
     file_name: String,
@@ -23,6 +23,8 @@ pub struct GitIgnoreEngine {
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl GitIgnoreEngine {
@@ -45,6 +47,7 @@ impl GitIgnoreEngine {
             pending_g: false,
             last_view_height: 0,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -65,7 +68,7 @@ impl GitIgnoreEngine {
             .skip(self.scroll)
             .take(height)
             .enumerate()
-            .map(|(idx, (line_no, parsed))| {
+            .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
 
@@ -230,6 +233,26 @@ impl GitIgnoreEngine {
         None
     }
 
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        self.lines.get(self.selection).map(|(_, raw, _)| raw.clone())
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.lines.len();
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = self.lines[start..=end].iter().map(|(_, raw, _)| raw.clone()).collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
+    }
+
     pub fn content_height(&self) -> usize {
         self.lines.len()
     }
@@ -238,7 +261,7 @@ impl GitIgnoreEngine {
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
         self.lines
             .iter()
-            .map(|(line_no, parsed)| {
+            .map(|(line_no, _raw, parsed)| {
                 let mut spans = Vec::new();
                 spans.push(Span::styled(
                     format!("{:>width$} ", line_no, width = line_no_width),
@@ -280,7 +303,7 @@ impl GitIgnoreEngine {
             } else {
                 (start + total - offset % total) % total
             };
-            let text = match &self.lines[idx].1 {
+            let text = match &self.lines[idx].2 {
                 GitIgnoreLine::Pattern { pattern, .. } => pattern.clone(),
                 GitIgnoreLine::Comment(text) => text.clone(),
                 GitIgnoreLine::Empty => String::new(),
@@ -294,20 +317,21 @@ impl GitIgnoreEngine {
     }
 }
 
-fn parse_gitignore(content: &str) -> Vec<(usize, GitIgnoreLine)> {
+fn parse_gitignore(content: &str) -> Vec<(usize, String, GitIgnoreLine)> {
     let mut lines = Vec::new();
 
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
+        let raw = line.to_string();
         let trimmed = line.trim();
 
         if trimmed.is_empty() {
-            lines.push((line_no, GitIgnoreLine::Empty));
+            lines.push((line_no, raw, GitIgnoreLine::Empty));
             continue;
         }
 
         if trimmed.starts_with('#') {
-            lines.push((line_no, GitIgnoreLine::Comment(trimmed.to_string())));
+            lines.push((line_no, raw, GitIgnoreLine::Comment(trimmed.to_string())));
             continue;
         }
 
@@ -325,7 +349,7 @@ fn parse_gitignore(content: &str) -> Vec<(usize, GitIgnoreLine)> {
             pattern
         };
 
-        lines.push((line_no, GitIgnoreLine::Pattern { pattern, is_negated, is_dir }));
+        lines.push((line_no, raw, GitIgnoreLine::Pattern { pattern, is_negated, is_dir }));
     }
 
     lines

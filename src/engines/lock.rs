@@ -24,6 +24,8 @@ pub struct LockEngine {
     last_query: Option<String>,
     pending_g: bool,
     last_match: Option<String>,
+    /// Visual selection range (start, end) for highlighting
+    pub visual_range: Option<(usize, usize)>,
 }
 
 impl LockEngine {
@@ -50,6 +52,7 @@ impl LockEngine {
             last_query: None,
             pending_g: false,
             last_match: None,
+            visual_range: None,
         })
     }
 
@@ -197,6 +200,42 @@ impl LockEngine {
     #[allow(dead_code)]
     pub fn selected_path(&self) -> Option<String> {
         None
+    }
+
+    /// Get the content of the currently selected line
+    pub fn get_selected_line(&self) -> Option<String> {
+        if self.selection == 0 {
+            Some("Name\tVersion\tSource\tChecksum\tDependencies".to_string())
+        } else {
+            self.entries.get(self.selection.saturating_sub(1)).map(|e| {
+                format!("{}\t{}\t{}\t{}\t{}", e.name, e.version, e.source, e.checksum, e.dependencies.join(", "))
+            })
+        }
+    }
+
+    /// Get lines in a range (inclusive), joined by newlines
+    pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
+        let (start, end) = if start <= end { (start, end) } else { (end, start) };
+        let total = self.entries.len() + 1;
+        if start >= total { return None; }
+        let end = end.min(total.saturating_sub(1));
+        let lines: Vec<String> = (start..=end)
+            .filter_map(|idx| {
+                if idx == 0 {
+                    Some("Name\tVersion\tSource\tChecksum\tDependencies".to_string())
+                } else {
+                    self.entries.get(idx.saturating_sub(1)).map(|e| {
+                        format!("{}\t{}\t{}\t{}\t{}", e.name, e.version, e.source, e.checksum, e.dependencies.join(", "))
+                    })
+                }
+            })
+            .collect();
+        if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    }
+
+    /// Get current selection index (for visual mode)
+    pub fn selection(&self) -> usize {
+        self.selection
     }
 
     pub fn content_height(&self) -> usize {
