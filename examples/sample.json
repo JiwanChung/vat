@@ -1,9 +1,22 @@
 {
-  "project": "Vat",
-  "version": 1,
-  "active": true,
-  "metadata": {
-    "tags": ["tui", "rust", "viewer"],
-    "stats": {"files": 12, "stars": 1200}
+  "name": "vat",
+  "version": "0.1.0",
+  "description": "A semantic file viewer for the terminal",
+  "features": {
+    "formats": ["json", "yaml", "csv", "sqlite", "xml"],
+    "navigation": {
+      "vim_style": true,
+      "search": true,
+      "filter": true
+    },
+    "clipboard": {
+      "yank_line": "yy",
+      "visual_mode": "v"
+    }
+  },
+  "stats": {
+    "engines": 18,
+    "lines_of_code": 12000,
+    "stars": 42
   }
 }

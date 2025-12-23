@@ -18,6 +18,10 @@
   <a href="#keybindings">Keybindings</a>
 </p>
 
+<p align="center">
+  <img src="demo.gif" alt="vat demo" width="800">
+</p>
+
 ---
 
 **vat** renders files the way they're meant to be seen. Instead of dumping raw text, it understands your files and presents them semantically — JSON as collapsible trees, CSVs as aligned tables, images as ASCII art, SQLite as browsable databases, and much more.

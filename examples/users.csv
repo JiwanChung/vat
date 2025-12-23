@@ -1,0 +1,6 @@
+id,name,email,role,joined
+1,Alice Chen,alice@example.com,Admin,2023-01-15
+2,Bob Smith,bob@example.com,Developer,2023-03-22
+3,Carol White,carol@example.com,Designer,2023-05-10
+4,David Brown,david@example.com,Developer,2023-06-18
+5,Eve Johnson,eve@example.com,Manager,2023-08-01
