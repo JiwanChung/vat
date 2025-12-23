@@ -9,6 +9,7 @@ Set Width 900
 Set Height 500
 Set Theme "Catppuccin Mocha"
 Set Padding 20
+Set TypingSpeed 50ms
 
 # JSON Demo
 Type "vat examples/sample.json"
@@ -16,9 +17,15 @@ Sleep 400ms
 Enter
 Sleep 1.2s
 
-# Navigate
-Type "jjjj"
-Sleep 600ms
+# Navigate down one at a time
+Type "j"
+Sleep 150ms
+Type "j"
+Sleep 150ms
+Type "j"
+Sleep 150ms
+Type "j"
+Sleep 400ms
 
 # Collapse node
 Enter
@@ -31,7 +38,7 @@ Sleep 600ms
 # Search
 Type "/"
 Sleep 200ms
-Type "engines"
+Type@30ms "engines"
 Enter
 Sleep 800ms
 
@@ -45,13 +52,17 @@ Enter
 Sleep 1.2s
 
 # Navigate
-Type "jjj"
-Sleep 600ms
+Type "j"
+Sleep 150ms
+Type "j"
+Sleep 150ms
+Type "j"
+Sleep 400ms
 
 # Search
 Type "/"
 Sleep 200ms
-Type "Developer"
+Type@30ms "Dev"
 Enter
 Sleep 800ms
 
@@ -67,8 +78,16 @@ Sleep 400ms
 Enter
 Sleep 1.2s
 
-Type "jjjjj"
-Sleep 600ms
+Type "j"
+Sleep 100ms
+Type "j"
+Sleep 100ms
+Type "j"
+Sleep 100ms
+Type "j"
+Sleep 100ms
+Type "j"
+Sleep 400ms
 
 Enter
 Sleep 500ms
