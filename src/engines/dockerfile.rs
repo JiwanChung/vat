@@ -55,7 +55,7 @@ impl DockerfileEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -75,11 +75,17 @@ impl DockerfileEngine {
             .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
                 let line_no_str = format!("{:>width$} ", line_no, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::LightYellow)
                 };
@@ -90,16 +96,22 @@ impl DockerfileEngine {
                     DockerLine::From { image, alias, stage_num } => {
                         let stage_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray)
                         };
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Magenta).bold()
                         };
                         let img_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Green)
                         };
@@ -114,20 +126,26 @@ impl DockerfileEngine {
                     DockerLine::Instruction { cmd, args } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Cyan).bold()
                         };
                         let args_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Yellow)
                         };
                         spans.push(Span::styled(format!("{} ", cmd), cmd_style));
-                        spans.push(Span::styled(truncate(args, 60), args_style));
+                        spans.push(Span::styled(args.clone(), args_style));
                     }
                     DockerLine::Arg { name, default } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Cyan).bold()
                         };
@@ -141,6 +159,8 @@ impl DockerfileEngine {
                     DockerLine::Env { key, value } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Cyan).bold()
                         };
@@ -152,17 +172,21 @@ impl DockerfileEngine {
                     DockerLine::Label { key, value } => {
                         let cmd_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(Color::Cyan).bold()
                         };
                         spans.push(Span::styled("LABEL ", cmd_style));
-                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::White).bold()));
                         spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
-                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::Yellow)));
                     }
                     DockerLine::Comment(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray).italic()
                         };
@@ -175,6 +199,7 @@ impl DockerfileEngine {
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }
@@ -338,10 +363,30 @@ impl DockerfileEngine {
                         spans.push(Span::styled(format!("{} ", cmd), Style::default().fg(Color::LightCyan).bold()));
                         spans.push(Span::styled(args.clone(), Style::default().fg(Color::White)));
                     }
+                    DockerLine::Arg { name, default } => {
+                        spans.push(Span::styled("ARG ", Style::default().fg(Color::LightCyan).bold()));
+                        spans.push(Span::styled(name.clone(), Style::default().fg(Color::White).bold()));
+                        if let Some(def) = default {
+                            spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                            spans.push(Span::styled(def.clone(), Style::default().fg(Color::LightYellow)));
+                        }
+                    }
+                    DockerLine::Env { key, value } => {
+                        spans.push(Span::styled("ENV ", Style::default().fg(Color::LightCyan).bold()));
+                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::White).bold()));
+                        spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::LightYellow)));
+                    }
+                    DockerLine::Label { key, value } => {
+                        spans.push(Span::styled("LABEL ", Style::default().fg(Color::LightCyan).bold()));
+                        spans.push(Span::styled(key.clone(), Style::default().fg(Color::White).bold()));
+                        spans.push(Span::styled("=", Style::default().fg(Color::DarkGray)));
+                        spans.push(Span::styled(value.clone(), Style::default().fg(Color::LightYellow)));
+                    }
                     DockerLine::Comment(text) => {
                         spans.push(Span::styled(text.clone(), Style::default().fg(Color::DarkGray)));
                     }
-                    _ => {}
+                    DockerLine::Empty => {}
                 }
 
                 Line::from(spans)
@@ -489,15 +534,6 @@ fn parse_dockerfile(content: &str) -> Vec<(usize, String, DockerLine)> {
     }
 
     lines
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

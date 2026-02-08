@@ -76,7 +76,7 @@ impl XmlEngine {
         visible
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -104,12 +104,18 @@ impl XmlEngine {
                 let node = &self.nodes[node_idx];
                 let row = self.scroll + display_idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
                 let is_collapsed = self.collapsed.contains(&node.node_index);
 
                 let mut spans = Vec::new();
                 let line_no = format!("{:>width$} ", node_idx + 1, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::LightYellow)
                 };
@@ -125,6 +131,8 @@ impl XmlEngine {
                     let marker = if is_collapsed { "▸ " } else { "▾ " };
                     let marker_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::Magenta)
                     };
@@ -136,11 +144,15 @@ impl XmlEngine {
                 // Tag opening bracket and name
                 let bracket_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::Cyan)
                 };
                 let tag_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::Cyan).bold()
                 };
@@ -151,16 +163,20 @@ impl XmlEngine {
                 for (key, value) in &node.attributes {
                     let attr_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::White)
                     };
                     let val_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::Yellow)
                     };
                     spans.push(Span::styled(format!(" {}=", key), attr_style));
-                    spans.push(Span::styled(format!("\"{}\"", truncate(value, 20)), val_style));
+                    spans.push(Span::styled(format!("\"{}\"", value), val_style));
                 }
 
                 spans.push(Span::styled(">", bracket_style));
@@ -169,16 +185,19 @@ impl XmlEngine {
                 if let Some(text) = &node.text {
                     let text_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::Yellow)
                     };
-                    spans.push(Span::styled(format!(" {}", truncate(text, 40)), text_style));
+                    spans.push(Span::styled(format!(" {}", text), text_style));
                 }
 
                 Line::from(spans)
             })
             .collect();
 
+        let display = if wrap { super::wrap_lines(display, area.width as usize) } else { display };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(display).block(block), area);
     }
@@ -455,15 +474,6 @@ fn parse_xml(content: &str) -> Result<Vec<XmlNode>> {
 
     visit(doc.root_element(), 0, &mut nodes, &mut node_index);
     Ok(nodes)
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

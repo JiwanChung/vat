@@ -89,17 +89,17 @@ impl SqliteEngine {
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
         match self.view_mode {
-            ViewMode::Schema => self.render_schema(frame, area),
+            ViewMode::Schema => self.render_schema(frame, area, wrap),
             ViewMode::Preview => self.render_preview(frame, area),
         }
     }
 
-    fn render_schema(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_schema(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height.saturating_sub(1) as usize;
 
         // Build display lines
@@ -109,10 +109,16 @@ impl SqliteEngine {
         for (table_idx, table) in self.tables.iter().enumerate() {
             let is_current = table_idx == self.current_table;
             let selected = line_idx == self.selection;
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                line_idx >= lo && line_idx <= hi
+            });
 
             // Table header
             let table_style = if selected {
                 Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+            } else if in_visual {
+                Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
             } else if is_current {
                 Style::default().fg(Color::LightGreen).bold()
             } else {
@@ -130,8 +136,14 @@ impl SqliteEngine {
             // Columns
             for col in &table.columns {
                 let selected = line_idx == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    line_idx >= lo && line_idx <= hi
+                });
                 let col_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -142,6 +154,8 @@ impl SqliteEngine {
                 // Color type based on SQL data type
                 let type_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     let upper = col.col_type.to_uppercase();
                     if upper.contains("INT") || upper.contains("REAL") || upper.contains("NUMERIC") || upper.contains("FLOAT") || upper.contains("DOUBLE") {
@@ -161,7 +175,7 @@ impl SqliteEngine {
 
                 display_lines.push((selected, Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(&col.name, col_style),
+                    Span::styled(col.name.clone(), col_style),
                     Span::styled(format!(" {}", col.col_type), type_style),
                     Span::styled(pk_marker, Style::default().fg(Color::Yellow)),
                     Span::styled(null_marker, Style::default().fg(Color::DarkGray)),
@@ -191,6 +205,7 @@ impl SqliteEngine {
             .map(|(_, line)| line)
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(ratatui::widgets::Paragraph::new(visible).block(block), area);
     }
@@ -221,7 +236,12 @@ impl SqliteEngine {
             .skip(self.scroll)
             .take(height)
             .enumerate()
-            .map(|(_, row)| {
+            .map(|(idx, row)| {
+                let abs_row = self.scroll + idx;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    abs_row >= lo && abs_row <= hi
+                });
                 let cells: Vec<Cell> = row
                     .iter()
                     .map(|v| {
@@ -237,10 +257,14 @@ impl SqliteEngine {
                         } else {
                             Style::default().fg(Color::Yellow)
                         };
-                        Cell::from(truncate(v, 30)).style(style)
+                        Cell::from(v.clone()).style(style)
                     })
                     .collect();
-                Row::new(cells)
+                let mut table_row = Row::new(cells);
+                if in_visual {
+                    table_row = table_row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+                }
+                table_row
             })
             .collect();
 
@@ -591,15 +615,6 @@ fn get_preview_rows(conn: &Connection, table_name: &str, columns: &[ColumnInfo])
         .collect();
 
     Ok(rows)
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

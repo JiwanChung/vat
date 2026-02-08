@@ -1,9 +1,259 @@
+# ===========================================
+# SSH Client Configuration (~/.ssh/config)
+# ACME Platform Infrastructure Access
+# ===========================================
+
+# --- Global Defaults ---
+
+Host *
+  AddKeysToAgent yes
+  IdentitiesOnly yes
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+  TCPKeepAlive yes
+  Compression yes
+  HashKnownHosts yes
+  StrictHostKeyChecking ask
+  VisualHostKey yes
+  LogLevel ERROR
+
+# --- Version Control ---
+
 Host github.com
   HostName github.com
   User git
-  IdentityFile ~/.ssh/id_ed25519
+  IdentityFile ~/.ssh/id_ed25519_github
+  PreferredAuthentications publickey
 
-Host internal.example.com
-  HostName 10.1.2.3
+Host gitlab.acme.dev
+  HostName gitlab.internal.acme.dev
+  User git
+  IdentityFile ~/.ssh/id_ed25519_acme
+  Port 2222
+  ProxyJump bastion-east
+
+# --- Bastion / Jump Hosts ---
+
+Host bastion-east
+  HostName bastion-east.acme.com
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  Port 2222
+  ForwardAgent no
+  ControlMaster auto
+  ControlPath ~/.ssh/sockets/%r@%h-%p
+  ControlPersist 600
+
+Host bastion-west
+  HostName bastion-west.acme.com
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  Port 2222
+  ForwardAgent no
+  ControlMaster auto
+  ControlPath ~/.ssh/sockets/%r@%h-%p
+  ControlPersist 600
+
+# --- Production: API Servers (us-east-1) ---
+
+Host api-prod-01
+  HostName 10.1.10.11
   User deploy
-  IdentityFile ./keys/internal
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+Host api-prod-02
+  HostName 10.1.10.12
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+Host api-prod-03
+  HostName 10.1.10.13
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+Host api-prod-04
+  HostName 10.2.10.11
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-west
+
+Host api-prod-05
+  HostName 10.2.10.12
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-west
+
+# --- Production: Database Servers ---
+
+Host pg-primary
+  HostName 10.1.20.10
+  User dbadmin
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 15432 localhost:5432
+  RequestTTY no
+
+Host pg-replica-01
+  HostName 10.1.20.11
+  User dbadmin
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 15433 localhost:5432
+
+Host pg-replica-02
+  HostName 10.2.20.11
+  User dbadmin
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-west
+  LocalForward 15434 localhost:5432
+
+# --- Production: Cache & Queue ---
+
+Host redis-master
+  HostName 10.1.30.10
+  User cacheadmin
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 16379 localhost:6379
+
+Host kafka-0
+  HostName 10.1.40.10
+  User kafka
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 19092 localhost:9092
+
+Host kafka-1
+  HostName 10.1.40.11
+  User kafka
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+Host kafka-2
+  HostName 10.1.40.12
+  User kafka
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+# --- Production: Workers ---
+
+Host worker-0?
+  HostName 10.1.50.%h
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+# --- Monitoring Stack ---
+
+Host monitor-01
+  HostName 10.1.60.10
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 19090 localhost:9090
+  LocalForward 13000 localhost:3000
+
+Host grafana-01
+  HostName 10.1.60.11
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 13001 localhost:3000
+
+# --- Staging Environment ---
+
+Host staging-api
+  HostName 10.3.10.10
+  User deploy
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+
+Host staging-db
+  HostName 10.3.20.10
+  User dbadmin
+  IdentityFile ~/.ssh/id_ed25519_acme
+  ProxyJump bastion-east
+  LocalForward 25432 localhost:5432
+
+# --- CI/CD Runners ---
+
+Host ci-runner-01
+  HostName 10.1.70.10
+  User ci
+  IdentityFile ~/.ssh/id_ed25519_ci
+  ProxyJump bastion-east
+
+Host ci-runner-02
+  HostName 10.1.70.11
+  User ci
+  IdentityFile ~/.ssh/id_ed25519_ci
+  ProxyJump bastion-east
+
+# --- Development: Local VMs ---
+
+Host dev-vm
+  HostName 192.168.64.2
+  User dev
+  IdentityFile ~/.ssh/id_ed25519
+  Port 22
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  ForwardAgent yes
+
+Host docker-vm
+  HostName 192.168.64.3
+  User docker
+  IdentityFile ~/.ssh/id_ed25519
+  Port 22
+  StrictHostKeyChecking no
+  UserKnownHostsFile /dev/null
+  LocalForward 12375 /var/run/docker.sock
+
+# --- Raspberry Pi Cluster (home lab) ---
+
+Host pi-master
+  HostName 192.168.1.100
+  User pi
+  IdentityFile ~/.ssh/id_ed25519_homelab
+  Port 22
+
+Host pi-node-01
+  HostName 192.168.1.101
+  User pi
+  IdentityFile ~/.ssh/id_ed25519_homelab
+
+Host pi-node-02
+  HostName 192.168.1.102
+  User pi
+  IdentityFile ~/.ssh/id_ed25519_homelab
+
+Host pi-node-03
+  HostName 192.168.1.103
+  User pi
+  IdentityFile ~/.ssh/id_ed25519_homelab
+
+# --- Tunnel Shortcuts ---
+
+# Forward pgAdmin to production primary
+Host tunnel-pgadmin
+  HostName bastion-east.acme.com
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  Port 2222
+  LocalForward 15432 10.1.20.10:5432
+  LocalForward 16379 10.1.30.10:6379
+  RequestTTY no
+  SessionType none
+
+# SOCKS proxy through bastion for internal services
+Host tunnel-socks
+  HostName bastion-east.acme.com
+  User ops
+  IdentityFile ~/.ssh/id_ed25519_acme
+  Port 2222
+  DynamicForward 1080
+  RequestTTY no
+  SessionType none

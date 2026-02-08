@@ -58,7 +58,7 @@ impl MakefileEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -78,11 +78,17 @@ impl MakefileEngine {
             .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
                 let line_no_str = format!("{:>width$} ", line_no, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -96,6 +102,8 @@ impl MakefileEngine {
                         }
                         let name_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Cyan).bold()
                         };
@@ -104,6 +112,8 @@ impl MakefileEngine {
                         if !deps.is_empty() {
                             let dep_style = if selected {
                                 Style::default().fg(Color::Black).bg(Color::LightBlue)
+                            } else if in_visual {
+                                Style::default().fg(Color::Black).bg(Color::LightYellow)
                             } else {
                                 Style::default().fg(Color::Green)
                             };
@@ -113,6 +123,8 @@ impl MakefileEngine {
                     MakeLine::Recipe(cmd) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Yellow)
                         };
@@ -122,26 +134,34 @@ impl MakefileEngine {
                     MakeLine::Variable { name, op, value } => {
                         let name_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::White).bold()
                         };
                         let op_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray)
                         };
                         let val_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Yellow)
                         };
                         spans.push(Span::styled(name.clone(), name_style));
                         spans.push(Span::styled(format!(" {} ", op), op_style));
-                        spans.push(Span::styled(truncate(value, 50), val_style));
+                        spans.push(Span::styled(value.clone(), val_style));
                     }
                     MakeLine::Include(path) => {
                         let kw_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Magenta)
                         };
@@ -151,6 +171,8 @@ impl MakefileEngine {
                     MakeLine::Conditional(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Magenta)
                         };
@@ -159,6 +181,8 @@ impl MakefileEngine {
                     MakeLine::Comment(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray).italic()
                         };
@@ -171,6 +195,7 @@ impl MakefileEngine {
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }
@@ -344,10 +369,17 @@ impl MakefileEngine {
                         spans.push(Span::styled(format!(" {} ", op), Style::default().fg(Color::White)));
                         spans.push(Span::styled(value.clone(), Style::default().fg(Color::LightCyan)));
                     }
+                    MakeLine::Include(path) => {
+                        spans.push(Span::styled("include ", Style::default().fg(Color::LightMagenta)));
+                        spans.push(Span::styled(path.clone(), Style::default().fg(Color::LightGreen)));
+                    }
+                    MakeLine::Conditional(text) => {
+                        spans.push(Span::styled(text.clone(), Style::default().fg(Color::LightMagenta)));
+                    }
                     MakeLine::Comment(text) => {
                         spans.push(Span::styled(text.clone(), Style::default().fg(Color::DarkGray)));
                     }
-                    _ => {}
+                    MakeLine::Empty => {}
                 }
 
                 Line::from(spans)
@@ -489,15 +521,6 @@ fn parse_makefile(content: &str) -> (Vec<(usize, String, MakeLine)>, Vec<String>
     }
 
     (lines, phony_targets)
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

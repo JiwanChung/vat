@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
 #[derive(Clone)]
 struct EnvEntry {
@@ -55,7 +55,7 @@ impl EnvEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         self.last_view_height = area.height as usize;
         let height = area.height.saturating_sub(1) as usize;
 
@@ -65,6 +65,14 @@ impl EnvEngine {
             self.scroll = self.selection.saturating_sub(height - 1);
         }
 
+        if wrap {
+            self.render_paragraph(frame, area, height);
+        } else {
+            self.render_table(frame, area, height);
+        }
+    }
+
+    fn render_table(&self, frame: &mut ratatui::Frame, area: Rect, height: usize) {
         let slice = if self.entries.is_empty() {
             &[][..]
         } else {
@@ -86,28 +94,20 @@ impl EnvEngine {
         let header = Row::new(headers);
 
         let mut rows = Vec::new();
-        for entry in slice.iter() {
+        for (idx, entry) in slice.iter().enumerate() {
+            let abs_row = self.scroll + idx;
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                abs_row >= lo && abs_row <= hi
+            });
+
             let display_value = if entry.is_secret && !self.show_secrets {
                 "••••••••".to_string()
             } else {
-                truncate(&entry.value, 50)
+                entry.value.clone()
             };
 
-            // Smart value coloring
-            let value_style = if entry.is_secret {
-                Style::default().fg(Color::Red)
-            } else {
-                let v = entry.value.to_lowercase();
-                if v == "true" || v == "false" || v == "yes" || v == "no" {
-                    Style::default().fg(Color::Cyan)
-                } else if entry.value.parse::<f64>().is_ok() {
-                    Style::default().fg(Color::Magenta)
-                } else if entry.value.starts_with('/') || entry.value.contains("://") {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::Yellow)
-                }
-            };
+            let value_style = self.value_color(entry);
 
             let cells = vec![
                 Cell::from(entry.line_no.to_string())
@@ -119,7 +119,11 @@ impl EnvEngine {
                     .style(Style::default().fg(Color::White).bold()),
                 Cell::from(display_value).style(value_style),
             ];
-            rows.push(Row::new(cells));
+            let mut row = Row::new(cells);
+            if in_visual {
+                row = row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+            }
+            rows.push(row);
         }
 
         let widths = vec![
@@ -141,6 +145,100 @@ impl EnvEngine {
             state.select(Some(relative));
         }
         frame.render_stateful_widget(table, area, &mut state);
+    }
+
+    fn render_paragraph(&self, frame: &mut ratatui::Frame, area: Rect, height: usize) {
+        let num_width = self.entries.len().max(1).to_string().len().max(2);
+        let selected_style = Style::default().fg(Color::Black).bg(Color::LightBlue);
+        let visual_style = Style::default().fg(Color::Black).bg(Color::LightYellow);
+
+        let visible: Vec<Line<'static>> = self.entries.iter().enumerate()
+            .skip(self.scroll)
+            .take(height)
+            .map(|(idx, entry)| {
+                let selected = idx == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    idx >= lo && idx <= hi
+                });
+
+                let display_value = if entry.is_secret && !self.show_secrets {
+                    "••••••••".to_string()
+                } else {
+                    entry.value.clone()
+                };
+
+                let line_no_style = if selected {
+                    selected_style.bold()
+                } else if in_visual {
+                    visual_style.bold()
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                let cat_style = if selected {
+                    selected_style
+                } else if in_visual {
+                    visual_style
+                } else {
+                    Style::default().fg(Color::Magenta)
+                };
+
+                let key_style = if selected {
+                    selected_style.bold()
+                } else if in_visual {
+                    visual_style.bold()
+                } else {
+                    Style::default().fg(Color::White).bold()
+                };
+
+                let val_style = if selected {
+                    selected_style
+                } else if in_visual {
+                    visual_style
+                } else {
+                    self.value_color(entry)
+                };
+
+                let sep_style = if selected {
+                    selected_style
+                } else if in_visual {
+                    visual_style
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                Line::from(vec![
+                    Span::styled(format!("{:>width$} ", entry.line_no, width = num_width), line_no_style),
+                    Span::styled("│ ", sep_style),
+                    Span::styled(format!("{:<12} ", entry.category.clone()), cat_style),
+                    Span::styled(entry.key.clone(), key_style),
+                    Span::styled(" = ", sep_style),
+                    Span::styled(display_value, val_style),
+                ])
+            })
+            .collect();
+
+        let visible = super::wrap_lines(visible, area.width as usize);
+        let block = Block::default().borders(Borders::NONE);
+        frame.render_widget(Paragraph::new(visible).block(block), area);
+    }
+
+    fn value_color(&self, entry: &EnvEntry) -> Style {
+        if entry.is_secret {
+            Style::default().fg(Color::Red)
+        } else {
+            let v = entry.value.to_lowercase();
+            if v == "true" || v == "false" || v == "yes" || v == "no" {
+                Style::default().fg(Color::Cyan)
+            } else if entry.value.parse::<f64>().is_ok() {
+                Style::default().fg(Color::Magenta)
+            } else if entry.value.starts_with('/') || entry.value.contains("://") {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::Yellow)
+            }
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -422,15 +520,6 @@ fn is_secret_key(key: &str) -> bool {
         || upper.contains("KEY") && !upper.contains("PUBLIC")
         || upper.contains("CREDENTIAL")
         || upper.contains("PRIVATE")
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

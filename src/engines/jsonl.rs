@@ -102,23 +102,8 @@ impl JsonlEngine {
     /// Parse a line as JSON and create a preview
     fn parse_line_preview(&self, line: &str) -> (String, bool) {
         match serde_json::from_str::<serde_json::Value>(line) {
-            Ok(value) => {
-                let preview = match &value {
-                    serde_json::Value::Object(map) => {
-                        let keys: Vec<_> = map.keys().take(3).collect();
-                        let key_str = keys.iter().map(|k| k.as_str()).collect::<Vec<_>>().join(", ");
-                        if map.len() > 3 {
-                            format!("{{{}... ({} keys)}}", key_str, map.len())
-                        } else {
-                            format!("{{{}}}", key_str)
-                        }
-                    }
-                    serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
-                    _ => format!("{}", value),
-                };
-                (preview, true)
-            }
-            Err(_) => (line.chars().take(60).collect::<String>(), false),
+            Ok(_) => (line.to_string(), true),
+            Err(_) => (line.to_string(), false),
         }
     }
 
@@ -174,19 +159,13 @@ impl JsonlEngine {
             serde_json::Value::Null => "null".to_string(),
             serde_json::Value::Bool(b) => b.to_string(),
             serde_json::Value::Number(n) => n.to_string(),
-            serde_json::Value::String(s) => {
-                if s.len() > 40 {
-                    format!("\"{}...\"", &s[..37])
-                } else {
-                    format!("\"{}\"", s)
-                }
-            }
+            serde_json::Value::String(s) => format!("\"{}\"", s),
             serde_json::Value::Array(arr) => format!("[{} items]", arr.len()),
             serde_json::Value::Object(map) => format!("{{{} keys}}", map.len()),
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -212,6 +191,10 @@ impl JsonlEngine {
             if let Some(content) = self.get_line(line_idx) {
                 let (preview, is_valid) = self.parse_line_preview(content);
                 let selected = line_idx == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    line_idx >= lo && line_idx <= hi
+                });
                 let is_expanded = self.expanded.contains(&line_idx);
 
                 // Main line
@@ -219,6 +202,8 @@ impl JsonlEngine {
                 let line_no = format!("{:>width$} ", line_idx + 1, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -230,6 +215,8 @@ impl JsonlEngine {
                     let marker = if is_expanded { "▾ " } else { "▸ " };
                     let marker_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::Magenta)
                     };
@@ -240,6 +227,8 @@ impl JsonlEngine {
 
                 let content_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else if is_valid {
                     Style::default().fg(Color::LightGreen)
                 } else {
@@ -261,7 +250,12 @@ impl JsonlEngine {
                             Style::default(),
                         ));
                         spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
-                        spans.push(Span::styled(text, style));
+                        let effective_style = if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
+                        } else {
+                            style
+                        };
+                        spans.push(Span::styled(text, effective_style));
                         visible_lines.push(Line::from(spans));
                     }
                 }
@@ -269,6 +263,7 @@ impl JsonlEngine {
             line_idx += 1;
         }
 
+        let visible_lines = if wrap { super::wrap_lines(visible_lines, area.width as usize) } else { visible_lines };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible_lines).block(block), area);
     }

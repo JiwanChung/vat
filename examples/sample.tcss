@@ -1,3 +1,534 @@
-.widget {
-  color: #1e90ff;
+/* ===========================================
+ * ACME Dashboard — Textual CSS (TCSS)
+ * Design system for a TUI monitoring application
+ * Compatible with Textual framework for Python
+ * =========================================== */
+
+/* --- Screen Layouts --- */
+
+Screen {
+    layout: grid;
+    grid-size: 3 4;
+    grid-gutter: 1 2;
+    grid-rows: 3 1fr 1fr 3;
+    background: $surface;
+}
+
+Screen.-maximized {
+    grid-size: 1 1;
+}
+
+/* --- Header & Footer --- */
+
+Header {
+    dock: top;
+    height: 3;
+    background: $primary;
+    color: $text;
+    text-style: bold;
+    content-align: center middle;
+    padding: 0 2;
+    column-span: 3;
+}
+
+Header .title {
+    text-style: bold;
+    color: $text;
+}
+
+Header .clock {
+    dock: right;
+    width: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+Footer {
+    dock: bottom;
+    height: 3;
+    background: $primary-darken-2;
+    column-span: 3;
+}
+
+Footer .key {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+    margin: 0 1;
+}
+
+/* --- Navigation Sidebar --- */
+
+#sidebar {
+    row-span: 2;
+    width: 32;
+    background: $panel;
+    border-right: tall $primary;
+    padding: 1 0;
+    overflow-y: auto;
+}
+
+#sidebar:focus-within {
+    border-right: tall $accent;
+}
+
+#sidebar .nav-item {
+    height: 3;
+    padding: 0 2;
+    content-align: left middle;
+    background: transparent;
+    color: $text;
+}
+
+#sidebar .nav-item:hover {
+    background: $primary-lighten-1;
+    color: $text;
+    text-style: bold;
+}
+
+#sidebar .nav-item.-active {
+    background: $accent;
+    color: $text;
+    text-style: bold reverse;
+}
+
+#sidebar .nav-item .icon {
+    width: 4;
+    text-align: center;
+    margin-right: 1;
+}
+
+#sidebar .nav-separator {
+    height: 1;
+    margin: 1 2;
+    background: $primary-lighten-2;
+}
+
+/* --- Main Content Panels --- */
+
+.panel {
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+.panel:focus {
+    border: round $accent;
+}
+
+.panel .panel-title {
+    dock: top;
+    height: 1;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+/* --- Metrics Cards --- */
+
+#metrics {
+    layout: horizontal;
+    height: auto;
+    column-span: 2;
+}
+
+.metric-card {
+    width: 1fr;
+    height: 7;
+    margin: 0 1;
+    background: $panel;
+    border: round $primary;
+    padding: 1 2;
+    content-align: center middle;
+}
+
+.metric-card .value {
+    text-style: bold;
+    color: $accent;
+}
+
+.metric-card .label {
+    color: $text-muted;
+}
+
+.metric-card.-positive .value {
+    color: $success;
+}
+
+.metric-card.-negative .value {
+    color: $error;
+}
+
+.metric-card.-warning .value {
+    color: $warning;
+}
+
+/* --- Data Tables --- */
+
+DataTable {
+    height: 1fr;
+    column-span: 2;
+}
+
+DataTable > .datatable--header {
+    background: $primary;
+    color: $text;
+    text-style: bold;
+    height: 1;
+}
+
+DataTable > .datatable--cursor {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+}
+
+DataTable > .datatable--hover {
+    background: $primary-lighten-1;
+}
+
+DataTable > .datatable--even-row {
+    background: $surface;
+}
+
+DataTable > .datatable--odd-row {
+    background: $panel;
+}
+
+DataTable .cell--highlight {
+    color: $warning;
+    text-style: bold;
+}
+
+/* --- Log Viewer --- */
+
+#log-panel {
+    row-span: 2;
+}
+
+RichLog {
+    height: 1fr;
+    background: $surface-darken-1;
+    border: round $primary;
+    scrollbar-size: 1 1;
+    padding: 0 1;
+}
+
+RichLog .log-info {
+    color: $accent;
+}
+
+RichLog .log-warn {
+    color: $warning;
+    text-style: bold;
+}
+
+RichLog .log-error {
+    color: $error;
+    text-style: bold;
+}
+
+RichLog .log-debug {
+    color: $text-muted;
+}
+
+RichLog .timestamp {
+    color: $text-disabled;
+    width: 24;
+}
+
+/* --- Sparkline Charts --- */
+
+Sparkline {
+    height: 5;
+    margin: 1 0;
+}
+
+Sparkline > .sparkline--max-color {
+    color: $success;
+}
+
+Sparkline > .sparkline--min-color {
+    color: $error;
+}
+
+/* --- Progress Bars --- */
+
+ProgressBar {
+    height: 1;
+    margin: 0 2;
+    padding: 0 1;
+}
+
+ProgressBar Bar {
+    width: 1fr;
+    background: $primary-darken-1;
+}
+
+ProgressBar Bar > .bar--bar {
+    color: $accent;
+}
+
+ProgressBar Bar > .bar--complete {
+    color: $success;
+}
+
+ProgressBar PercentageStatus {
+    width: 8;
+    text-align: right;
+    color: $text-muted;
+}
+
+/* --- Dialogs & Modals --- */
+
+ModalScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.65);
+}
+
+#dialog {
+    width: 60;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: thick $accent;
+    padding: 1 2;
+}
+
+#dialog .dialog-title {
+    dock: top;
+    height: 3;
+    text-style: bold;
+    content-align: center middle;
+    color: $accent;
+    border-bottom: solid $primary;
+    margin-bottom: 1;
+}
+
+#dialog .dialog-body {
+    height: auto;
+    max-height: 20;
+    overflow-y: auto;
+    padding: 1 0;
+}
+
+#dialog .dialog-footer {
+    dock: bottom;
+    height: 3;
+    layout: horizontal;
+    content-align: right middle;
+    border-top: solid $primary;
+    margin-top: 1;
+}
+
+/* --- Buttons --- */
+
+Button {
+    min-width: 12;
+    height: 3;
+    background: $primary;
+    color: $text;
+    border: tall $primary-lighten-1;
+    content-align: center middle;
+    text-style: bold;
+    margin: 0 1;
+}
+
+Button:hover {
+    background: $primary-lighten-1;
+    border: tall $accent;
+}
+
+Button:focus {
+    border: tall $accent;
+    text-style: bold underline;
+}
+
+Button.-primary {
+    background: $accent;
+    border: tall $accent-lighten-1;
+}
+
+Button.-primary:hover {
+    background: $accent-lighten-1;
+}
+
+Button.-danger {
+    background: $error;
+    border: tall $error-lighten-1;
+}
+
+Button.-danger:hover {
+    background: $error-lighten-1;
+}
+
+Button.-success {
+    background: $success;
+    border: tall $success-lighten-1;
+}
+
+Button:disabled {
+    background: $primary-darken-2;
+    color: $text-disabled;
+    border: tall $primary-darken-1;
+    text-style: none;
+    opacity: 0.5;
+}
+
+/* --- Input Fields --- */
+
+Input {
+    height: 3;
+    background: $surface;
+    border: tall $primary;
+    padding: 0 2;
+    margin: 1 0;
+}
+
+Input:focus {
+    border: tall $accent;
+}
+
+Input.-invalid {
+    border: tall $error;
+}
+
+Input .input--placeholder {
+    color: $text-disabled;
+}
+
+Input .input--cursor {
+    color: $text;
+    text-style: reverse;
+}
+
+/* --- Tabs --- */
+
+TabbedContent {
+    height: 1fr;
+}
+
+Tabs {
+    dock: top;
+    height: 3;
+    background: $primary-darken-1;
+}
+
+Tab {
+    padding: 0 3;
+    background: transparent;
+    color: $text-muted;
+}
+
+Tab:hover {
+    background: $primary;
+    color: $text;
+}
+
+Tab.-active {
+    background: $surface;
+    color: $accent;
+    text-style: bold;
+    border-bottom: tall $accent;
+}
+
+TabPane {
+    padding: 1 2;
+}
+
+/* --- Tree Widget --- */
+
+Tree {
+    height: 1fr;
+    background: $surface;
+    padding: 1;
+    scrollbar-size: 1 1;
+}
+
+Tree > .tree--cursor {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+}
+
+Tree > .tree--guides {
+    color: $primary-lighten-2;
+}
+
+Tree > .tree--highlight-line {
+    background: $primary-lighten-1;
+}
+
+/* --- Notifications / Toasts --- */
+
+Toast {
+    dock: bottom;
+    layer: notification;
+    width: auto;
+    max-width: 60;
+    margin: 1 2;
+    padding: 1 2;
+    background: $panel;
+    border: round $primary;
+}
+
+Toast.-information {
+    border: round $accent;
+}
+
+Toast.-warning {
+    border: round $warning;
+    background: $warning-darken-3;
+}
+
+Toast.-error {
+    border: round $error;
+    background: $error-darken-3;
+}
+
+/* --- Scrollbars --- */
+
+* {
+    scrollbar-background: $surface;
+    scrollbar-color: $primary-lighten-1;
+    scrollbar-color-hover: $accent;
+    scrollbar-color-active: $accent-lighten-1;
+    scrollbar-size-vertical: 2;
+    scrollbar-size-horizontal: 2;
+}
+
+/* --- Loading Indicator --- */
+
+LoadingIndicator {
+    height: auto;
+    content-align: center middle;
+    color: $accent;
+}
+
+/* --- Selection List --- */
+
+SelectionList {
+    height: 1fr;
+    background: $surface;
+    border: round $primary;
+    padding: 1;
+}
+
+SelectionList > .selection-list--button {
+    background: transparent;
+    color: $text;
+    height: 3;
+    padding: 0 2;
+}
+
+SelectionList > .selection-list--button-selected {
+    background: $accent-darken-2;
+    color: $text;
+    text-style: bold;
+}
+
+SelectionList > .selection-list--button-highlighted {
+    background: $primary-lighten-1;
 }

@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 use crossterm::event::{KeyCode, KeyEvent};
 use memmap2::Mmap;
+use serde::Deserialize;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -117,7 +118,7 @@ impl TreeEngine {
         Ok(engine)
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _wrap: bool) {
         self.rebuild_flat();
         if self.selection >= self.flat.len() {
             self.selection = self.flat.len().saturating_sub(1);
@@ -475,12 +476,7 @@ impl TreeEngine {
             NodeKind::Bool(value) => (value.to_string(), ValueKind::Bool, false),
             NodeKind::Number(value) => (value.clone(), ValueKind::Number, false),
             NodeKind::String(value) => {
-                let mut preview = value.clone();
-                if preview.len() > 50 {
-                    preview.truncate(47);
-                    preview.push_str("...");
-                }
-                (format!("\"{}\"", preview), ValueKind::String, false)
+                (format!("\"{}\"", value), ValueKind::String, false)
             }
             NodeKind::Object => ("{...}".to_string(), ValueKind::Object, true),
             NodeKind::Array => ("[...]".to_string(), ValueKind::Array, true),
@@ -531,8 +527,18 @@ fn parse_value(ext: &str, bytes: &[u8]) -> Result<serde_json::Value> {
     match ext {
         "json" => Ok(serde_json::from_slice(bytes)?),
         "yaml" | "yml" => {
-            let value: serde_yaml::Value = serde_yaml::from_slice(bytes)?;
-            Ok(serde_json::to_value(value)?)
+            let raw = std::str::from_utf8(bytes)?;
+            let mut docs: Vec<serde_json::Value> = Vec::new();
+            for document in serde_yaml::Deserializer::from_str(raw) {
+                let value: serde_yaml::Value =
+                    serde_yaml::Value::deserialize(document)?;
+                docs.push(serde_json::to_value(value)?);
+            }
+            match docs.len() {
+                0 => Ok(serde_json::Value::Null),
+                1 => Ok(docs.into_iter().next().unwrap()),
+                _ => Ok(serde_json::Value::Array(docs)),
+            }
         }
         "toml" => {
             let raw = std::str::from_utf8(bytes)?;

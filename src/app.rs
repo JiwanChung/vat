@@ -46,6 +46,8 @@ pub struct App {
     visual_start: Option<usize>,
     /// Track if 'y' was pressed (for 'yy' detection)
     pending_y: bool,
+    /// Global line-wrap toggle
+    wrap: bool,
 }
 
 impl App {
@@ -73,6 +75,7 @@ impl App {
             show_help: false,
             visual_start: None,
             pending_y: false,
+            wrap: false,
         }
     }
 
@@ -88,12 +91,12 @@ impl App {
             Paging::Never => return self.run_plain(cols),
             Paging::Auto => {}
         }
-        let content_height = self.engine.content_height();
         let inner_width = cols.saturating_sub(2) as usize;
-        let header_lines = self.plain_header_lines(inner_width).len();
-        let total_lines = content_height + header_lines + 2;
-        if total_lines <= rows as usize {
-            return self.run_plain(cols);
+        let all_lines = self.build_plain_lines(inner_width);
+        let boxed = box_lines(all_lines, inner_width);
+        if boxed.len() <= rows as usize {
+            write_plain(boxed)?;
+            return Ok(());
         }
         self.run_tui()
     }
@@ -115,11 +118,36 @@ impl App {
 
     fn run_plain(&mut self, cols: u16) -> Result<()> {
         let inner_width = cols.saturating_sub(2) as usize;
-        let mut lines = self.plain_header_lines(inner_width);
-        lines.extend(self.engine.render_plain_lines(inner_width as u16));
+        let lines = self.build_plain_lines(inner_width);
         let boxed = box_lines(lines, inner_width);
         write_plain(boxed)?;
         Ok(())
+    }
+
+    fn build_plain_lines(&mut self, inner_width: usize) -> Vec<Line<'static>> {
+        let mut header_lines = self.plain_header_lines(inner_width);
+        let content_lines = self.engine.render_plain_lines(inner_width as u16);
+        // Connect rule line to content gutter if present
+        if let Some(first) = content_lines.first() {
+            let (gutter_width, _) = detect_gutter(&first.spans);
+            if gutter_width > 0 {
+                // The │ is at column (gutter_width - 2) within the content
+                // (gutter = num_str + "│ ", so │ is at gutter_width - 2)
+                let pipe_col = gutter_width.saturating_sub(2);
+                if let Some(rule_line) = header_lines.last_mut() {
+                    let rule_style = Style::default().fg(ratatui::style::Color::LightBlue);
+                    let before = "─".repeat(pipe_col);
+                    let after = "─".repeat(inner_width.saturating_sub(pipe_col + 1));
+                    *rule_line = Line::from(vec![
+                        Span::styled(before, rule_style),
+                        Span::styled("┼", rule_style),
+                        Span::styled(after, rule_style),
+                    ]);
+                }
+            }
+        }
+        header_lines.extend(content_lines);
+        header_lines
     }
 
     fn run_tui(&mut self) -> Result<()> {
@@ -290,6 +318,10 @@ impl App {
                     self.input.buffer.clear();
                 }
             }
+            KeyCode::Char('w') => {
+                self.wrap = !self.wrap;
+                self.status = Some(if self.wrap { "Wrap ON".to_string() } else { "Wrap OFF".to_string() });
+            }
             KeyCode::Char('F') => {
                 // Clear filter
                 self.filter = None;
@@ -338,7 +370,7 @@ impl App {
             self.engine.set_visual_range(None);
         }
 
-        self.engine.render(frame, chunks[1]);
+        self.engine.render(frame, chunks[1], self.wrap);
 
         if self.input.active {
             // Render search/filter input box
@@ -471,6 +503,7 @@ impl App {
             Line::from("  yy           Copy current line"),
             Line::from("  v            Enter visual line mode"),
             Line::from("  s            Toggle sidebar/schema"),
+            Line::from("  w            Toggle line wrap"),
             Line::from("  e            Next section/heading"),
             Line::from(""),
             Line::from(vec![
@@ -552,41 +585,130 @@ fn box_lines(lines: Vec<Line<'static>>, inner_width: usize) -> Vec<Line<'static>
     let mut boxed = Vec::new();
     boxed.push(top);
     for line in lines {
-        let mut spans = Vec::new();
-        spans.push(Span::styled("│", border_style));
-        let mut content = fit_line_to_width(line, inner_width);
-        spans.append(&mut content);
-        spans.push(Span::styled("│", border_style));
-        boxed.push(Line::from(spans));
+        let rows = wrap_line_to_width(line, inner_width);
+        for row in rows {
+            let mut spans = Vec::new();
+            spans.push(Span::styled("│", border_style));
+            spans.extend(row);
+            spans.push(Span::styled("│", border_style));
+            boxed.push(Line::from(spans));
+        }
     }
     boxed.push(bottom);
     boxed
 }
 
-fn fit_line_to_width(line: Line<'static>, width: usize) -> Vec<Span<'static>> {
-    let mut spans = Vec::new();
-    let mut used = 0usize;
+fn wrap_line_to_width(line: Line<'static>, width: usize) -> Vec<Vec<Span<'static>>> {
+    if width == 0 {
+        return vec![vec![Span::raw("")]];
+    }
+
+    // Detect gutter (line number + "│" separator) for continuation indent
+    let (gutter_width, mut cont_spans) = detect_gutter(&line.spans);
+    let mut cont_width = gutter_width;
+
+    // Extend continuation with tree indent (whitespace span right after "│ ")
+    if gutter_width > 0 {
+        if let Some(gutter_idx) = line.spans.iter().position(|s| *s.content == *"│ ") {
+            if let Some(indent_span) = line.spans.get(gutter_idx + 1) {
+                if !indent_span.content.is_empty()
+                    && indent_span.content.chars().all(|c| c == ' ')
+                    && cont_width + indent_span.content.chars().count() < width
+                {
+                    let indent_width = indent_span.content.chars().count();
+                    cont_width += indent_width;
+                    cont_spans.push(Span::raw(" ".repeat(indent_width)));
+                }
+            }
+        }
+    }
+
+    let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
+    let mut current_row: Vec<Span<'static>> = Vec::new();
+    let mut col = 0usize;
+
     for span in line.spans {
-        if used >= width {
+        let style = span.style;
+        let mut buf = String::new();
+
+        for ch in span.content.chars() {
+            // Treat embedded newlines as forced line breaks
+            if ch == '\n' {
+                if !buf.is_empty() {
+                    current_row.push(Span::styled(buf.clone(), style));
+                    buf.clear();
+                }
+                if col < width {
+                    current_row.push(Span::raw(" ".repeat(width - col)));
+                }
+                rows.push(current_row);
+                current_row = Vec::new();
+                if cont_width > 0 && cont_width < width {
+                    current_row.extend(cont_spans.clone());
+                    col = cont_width;
+                } else {
+                    col = 0;
+                }
+                continue;
+            }
+            if col >= width {
+                // Flush current buffer into the row before starting a new one
+                if !buf.is_empty() {
+                    current_row.push(Span::styled(buf.clone(), style));
+                    buf.clear();
+                }
+                rows.push(current_row);
+                current_row = Vec::new();
+                // Indent continuation rows to align past the gutter + indent
+                if cont_width > 0 && cont_width < width {
+                    current_row.extend(cont_spans.clone());
+                    col = cont_width;
+                } else {
+                    col = 0;
+                }
+            }
+            buf.push(ch);
+            col += 1;
+        }
+
+        if !buf.is_empty() {
+            current_row.push(Span::styled(buf, style));
+        }
+    }
+
+    // Pad the final row to fill width
+    if col < width {
+        current_row.push(Span::raw(" ".repeat(width - col)));
+    }
+    rows.push(current_row);
+
+    rows
+}
+
+/// Detect line-number gutter by finding a "│ " separator span in the first few spans.
+/// Line-number engines use exactly "│ " (pipe + space); table engines use just "│",
+/// so this only matches real line-number gutters.
+/// Returns (total_gutter_width, continuation_spans) where continuation_spans
+/// is blank padding for the line number + the original "│ " separator with its style.
+fn detect_gutter(spans: &[Span<'static>]) -> (usize, Vec<Span<'static>>) {
+    let mut pre_width = 0;
+    for (i, span) in spans.iter().enumerate() {
+        if i > 2 {
             break;
         }
-        let mut text = String::new();
-        for ch in span.content.chars() {
-            if used + text.len() >= width {
-                break;
+        let span_width = span.content.chars().count();
+        if *span.content == *"│ " {
+            let total = pre_width + span_width;
+            let mut continuation = Vec::new();
+            if pre_width > 0 {
+                continuation.push(Span::raw(" ".repeat(pre_width)));
             }
-            text.push(ch);
+            continuation.push(Span::styled(span.content.to_string(), span.style));
+            return (total, continuation);
         }
-        let len = text.len();
-        if len > 0 {
-            spans.push(Span::styled(text, span.style));
-            used += len;
-        }
+        pre_width += span_width;
     }
-    if used < width {
-        spans.push(Span::raw(" ".repeat(width - used)));
-    }
-    spans
+    (0, Vec::new())
 }
 
 fn apply_style<W: Write>(out: &mut W, style: Style) -> Result<()> {

@@ -16,12 +16,23 @@ pub struct LogicEngine {
     scroll: usize,
     selection: usize,
     file_name: String,
+    kind: LogicKind,
     last_query: Option<String>,
     pending_g: bool,
     last_view_height: usize,
     last_match: Option<String>,
     /// Visual selection range (start, end) for highlighting
     pub visual_range: Option<(usize, usize)>,
+}
+
+/// Identifies which logic file type we're dealing with, so the colorizer
+/// can pattern-match line content appropriately.
+#[derive(Clone, Copy, PartialEq)]
+enum LogicKind {
+    Tmux,
+    Bashrc,
+    Crontab,
+    SshConfig,
 }
 
 impl LogicEngine {
@@ -32,20 +43,21 @@ impl LogicEngine {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let lines = if file_name == ".tmux.conf" {
-            parse_tmux(&raw)
+        let (lines, kind) = if file_name == ".tmux.conf" {
+            (parse_tmux(&raw), LogicKind::Tmux)
         } else if file_name == ".bashrc" {
-            parse_bashrc(&raw)
+            (parse_bashrc(&raw), LogicKind::Bashrc)
         } else if file_name == "crontab" {
-            parse_crontab(&raw)
+            (parse_crontab(&raw), LogicKind::Crontab)
         } else {
-            parse_ssh_config(path, &raw)
+            (parse_ssh_config(path, &raw), LogicKind::SshConfig)
         };
         Ok(Self {
             lines,
             scroll: 0,
             selection: 0,
             file_name,
+            kind,
             last_query: None,
             pending_g: false,
             last_view_height: 0,
@@ -54,7 +66,7 @@ impl LogicEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
         if self.selection < self.scroll {
@@ -72,29 +84,39 @@ impl LogicEngine {
             .map(|(idx, line)| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
                 let mut spans = Vec::new();
                 let line_no = format!("{:>width$} ", row + 1, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::LightYellow)
                 };
                 spans.push(Span::styled(line_no, line_no_style));
                 spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
-                let content_style = if line.trim_end().ends_with(':') {
-                    Style::default().fg(Color::LightCyan).bold()
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                let content_style = if selected {
-                    content_style.fg(Color::Black).bg(Color::LightBlue)
-                } else {
-                    content_style
-                };
-                spans.push(Span::styled(line.clone(), content_style));
+
+                let mut content_spans = colorize_logic_line(line, row, self.kind);
+                if selected {
+                    let sel = Style::default().fg(Color::Black).bg(Color::LightBlue);
+                    for s in &mut content_spans {
+                        s.style = sel;
+                    }
+                } else if in_visual {
+                    let vis = Style::default().fg(Color::Black).bg(Color::LightYellow);
+                    for s in &mut content_spans {
+                        s.style = vis;
+                    }
+                }
+                spans.extend(content_spans);
                 Line::from(spans)
             })
             .collect();
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }
@@ -116,12 +138,7 @@ impl LogicEngine {
                     Style::default().fg(Color::LightYellow),
                 ));
                 spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
-                let content_style = if line.trim_end().ends_with(':') {
-                    Style::default().fg(Color::LightCyan).bold()
-                } else {
-                    Style::default().fg(Color::White)
-                };
-                spans.push(Span::styled(line.clone(), content_style));
+                spans.extend(colorize_logic_line(line, idx, self.kind));
                 Line::from(spans)
             })
             .collect()
@@ -241,6 +258,137 @@ impl LogicEngine {
     /// Get current selection index (for visual mode)
     pub fn selection(&self) -> usize {
         self.selection
+    }
+}
+
+/// Produce colored spans for a single logic-engine line based on file kind and content.
+fn colorize_logic_line(line: &str, row: usize, kind: LogicKind) -> Vec<Span<'static>> {
+    // Section headers (ends with ':')
+    if line.trim_end().ends_with(':') {
+        return vec![Span::styled(
+            line.to_string(),
+            Style::default().fg(Color::LightCyan).bold(),
+        )];
+    }
+
+    // Separator line (all dashes)
+    if line.chars().all(|c| c == '-') && line.len() > 2 {
+        return vec![Span::styled(
+            line.to_string(),
+            Style::default().fg(Color::DarkGray),
+        )];
+    }
+
+    match kind {
+        LogicKind::SshConfig => {
+            // Table header row (row 1, the line with column names)
+            if row == 1 {
+                return vec![Span::styled(
+                    line.to_string(),
+                    Style::default().fg(Color::White).bold(),
+                )];
+            }
+            // Data rows: parse fixed-width columns
+            // Format: "{:<24}  {:<24}  {:<8}  {:<12}  {:<8}  {}"
+            if row >= 3 && line.len() >= 26 {
+                let mut spans = Vec::new();
+                let host = if line.len() >= 24 { &line[..24] } else { line };
+                spans.push(Span::styled(host.to_string(), Style::default().fg(Color::Cyan)));
+                if line.len() > 26 {
+                    spans.push(Span::styled("  ".to_string(), Style::default()));
+                    let rest = &line[26..];
+                    let hostname = if rest.len() >= 24 { &rest[..24] } else { rest };
+                    spans.push(Span::styled(hostname.to_string(), Style::default().fg(Color::White)));
+                    if rest.len() > 26 {
+                        spans.push(Span::styled("  ".to_string(), Style::default()));
+                        let rest2 = &rest[26..];
+                        let port = if rest2.len() >= 8 { &rest2[..8] } else { rest2 };
+                        spans.push(Span::styled(port.to_string(), Style::default().fg(Color::Magenta)));
+                        if rest2.len() > 10 {
+                            spans.push(Span::styled("  ".to_string(), Style::default()));
+                            let rest3 = &rest2[10..];
+                            let user = if rest3.len() >= 12 { &rest3[..12] } else { rest3 };
+                            spans.push(Span::styled(user.to_string(), Style::default().fg(Color::Green)));
+                            if rest3.len() > 14 {
+                                spans.push(Span::styled("  ".to_string(), Style::default()));
+                                let rest4 = &rest3[14..];
+                                // Identity status + path
+                                let status = if rest4.len() >= 8 { &rest4[..8] } else { rest4 };
+                                let status_trimmed = status.trim();
+                                let status_color = if status_trimmed == "ok" {
+                                    Color::Green
+                                } else if status_trimmed == "missing" {
+                                    Color::Red
+                                } else {
+                                    Color::White
+                                };
+                                spans.push(Span::styled(status.to_string(), Style::default().fg(status_color)));
+                                if rest4.len() > 10 {
+                                    spans.push(Span::styled("  ".to_string(), Style::default()));
+                                    let path = &rest4[10..];
+                                    spans.push(Span::styled(path.to_string(), Style::default().fg(Color::DarkGray)));
+                                }
+                            }
+                        }
+                    }
+                }
+                return spans;
+            }
+            vec![Span::styled(line.to_string(), Style::default().fg(Color::White))]
+        }
+        LogicKind::Tmux => {
+            // Tmux bindings: "- KEY -> command"
+            if let Some(rest) = line.strip_prefix("- ") {
+                if let Some(arrow_pos) = rest.find(" -> ") {
+                    let key = &rest[..arrow_pos];
+                    let cmd = &rest[arrow_pos + 4..];
+                    return vec![
+                        Span::styled("- ".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(key.to_string(), Style::default().fg(Color::LightGreen)),
+                        Span::styled(" -> ".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(cmd.to_string(), Style::default().fg(Color::Yellow)),
+                    ];
+                }
+            }
+            vec![Span::styled(line.to_string(), Style::default().fg(Color::White))]
+        }
+        LogicKind::Bashrc => {
+            // Bashrc exports: "- KEY=VALUE"
+            if let Some(rest) = line.strip_prefix("- ") {
+                if let Some(eq_pos) = rest.find('=') {
+                    let key = &rest[..eq_pos];
+                    let value = &rest[eq_pos + 1..];
+                    return vec![
+                        Span::styled("- ".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(key.to_string(), Style::default().fg(Color::LightGreen)),
+                        Span::styled("=".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(value.to_string(), Style::default().fg(Color::Yellow)),
+                    ];
+                }
+            }
+            vec![Span::styled(line.to_string(), Style::default().fg(Color::White))]
+        }
+        LogicKind::Crontab => {
+            // Crontab entries: "- SCHEDULE -> command"
+            if let Some(rest) = line.strip_prefix("- ") {
+                if let Some(arrow_pos) = rest.find(" -> ") {
+                    let schedule = &rest[..arrow_pos];
+                    let cmd = &rest[arrow_pos + 4..];
+                    return vec![
+                        Span::styled("- ".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(schedule.to_string(), Style::default().fg(Color::Cyan)),
+                        Span::styled(" -> ".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled(cmd.to_string(), Style::default().fg(Color::Yellow)),
+                    ];
+                }
+                // @reboot style entries without ->
+                return vec![
+                    Span::styled("- ".to_string(), Style::default().fg(Color::DarkGray)),
+                    Span::styled(rest.to_string(), Style::default().fg(Color::Cyan)),
+                ];
+            }
+            vec![Span::styled(line.to_string(), Style::default().fg(Color::White))]
+        }
     }
 }
 

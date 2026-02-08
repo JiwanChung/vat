@@ -1,4 +1,112 @@
-# m h dom mon dow command
-*/5 * * * * /usr/local/bin/backup.sh
-30 2 * * 1 /usr/local/bin/weekly-report
-@daily /usr/local/bin/daily-cleanup
+# ===========================================
+# ACME Platform — Cron Schedule
+# Server: cron-scheduler-01 (us-east-1a)
+# Last reviewed: 2024-12-01
+# ===========================================
+
+# Environment
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=ops-alerts@acme.dev
+ACME_ENV=production
+
+# --- Health & Monitoring (every few minutes) ---
+
+# Heartbeat ping to uptime monitor
+* * * * * /usr/local/bin/acme-heartbeat --endpoint=https://status.acme.dev/ping/prod-cron >/dev/null 2>&1
+
+# Collect system metrics (CPU, mem, disk, network)
+*/2 * * * * /usr/local/bin/collect-metrics --output=/var/log/acme/metrics.jsonl 2>&1 | logger -t acme-metrics
+
+# Check SSL certificate expiry (alert if < 14 days)
+*/30 * * * * /usr/local/bin/check-ssl-certs --domains=api.acme.com,app.acme.com,cdn.acme.com --warn-days=14 --alert-slack 2>&1 | logger -t ssl-check
+
+# Check disk space and alert if > 85%
+*/15 * * * * /usr/local/bin/disk-alert --threshold=85 --volumes=/,/data,/var/log --slack-webhook=$SLACK_OPS_WEBHOOK 2>&1 | logger -t disk-alert
+
+# --- Application Tasks (frequent) ---
+
+# Process outbound email queue
+*/5 * * * * /usr/local/bin/acme-cli queue:process --queue=email --batch=50 --timeout=120 2>&1 | tee -a /var/log/acme/email-queue.log
+
+# Flush analytics event buffer to data warehouse
+*/10 * * * * /usr/local/bin/acme-cli analytics:flush --buffer-dir=/tmp/events --dest=s3://acme-analytics/raw/ 2>&1 | tee -a /var/log/acme/analytics-flush.log
+
+# Sync inventory counts from warehouse API
+*/15 * * * * /usr/local/bin/acme-cli inventory:sync --source=warehouse-api --timeout=300 2>&1 | tee -a /var/log/acme/inventory-sync.log
+
+# Expire abandoned shopping carts (older than 2 hours)
+*/30 * * * * /usr/local/bin/acme-cli cart:expire --older-than=2h --batch=100 2>&1 | tee -a /var/log/acme/cart-expire.log
+
+# --- Hourly Tasks ---
+
+# Refresh materialized views for dashboard queries
+0 * * * * /usr/local/bin/acme-cli db:refresh-views --views=mv_daily_revenue,mv_product_performance --concurrently 2>&1 | tee -a /var/log/acme/refresh-views.log
+
+# Generate sitemap for SEO
+0 * * * * /usr/local/bin/acme-cli sitemap:generate --output=/var/www/acme/sitemap.xml --base-url=https://www.acme.com 2>&1 | tee -a /var/log/acme/sitemap.log
+
+# Purge expired sessions from Redis
+0 * * * * /usr/local/bin/acme-cli session:purge --older-than=24h --dry-run=false 2>&1 | tee -a /var/log/acme/session-purge.log
+
+# Sync product catalog to search index (Elasticsearch)
+30 * * * * /usr/local/bin/acme-cli search:reindex --index=products --since=last-hour --batch=500 2>&1 | tee -a /var/log/acme/search-reindex.log
+
+# --- Daily Tasks ---
+
+# Database backup (full, 2 AM UTC)
+0 2 * * * /usr/local/bin/pgbackrest --stanza=acme --type=diff backup 2>&1 | tee -a /var/log/acme/db-backup.log
+
+# Rotate and compress application logs
+0 3 * * * /usr/local/bin/acme-cli logs:rotate --dir=/var/log/acme --keep=30 --compress=zstd 2>&1 | logger -t log-rotate
+
+# Generate and email daily revenue report
+0 6 * * * /usr/local/bin/acme-cli reports:daily-revenue --format=pdf --recipients=finance@acme.dev,ceo@acme.dev 2>&1 | tee -a /var/log/acme/daily-report.log
+
+# Sync customer data to CRM (Salesforce)
+0 4 * * * /usr/local/bin/acme-cli crm:sync --provider=salesforce --since=yesterday --batch=1000 2>&1 | tee -a /var/log/acme/crm-sync.log
+
+# Cleanup temporary upload files older than 24h
+0 5 * * * /usr/local/bin/acme-cli storage:cleanup --bucket=acme-uploads-tmp --older-than=24h 2>&1 | tee -a /var/log/acme/storage-cleanup.log
+
+# Database maintenance: ANALYZE tables with stale statistics
+@daily /usr/local/bin/acme-cli db:analyze --tables=orders,order_items,events,customers --verbose 2>&1 | tee -a /var/log/acme/db-analyze.log
+
+# --- Weekly Tasks ---
+
+# Full database backup (Sunday 1 AM)
+0 1 * * 0 /usr/local/bin/pgbackrest --stanza=acme --type=full backup 2>&1 | tee -a /var/log/acme/db-backup-full.log
+
+# Verify backup integrity
+0 4 * * 0 /usr/local/bin/pgbackrest --stanza=acme verify 2>&1 | tee -a /var/log/acme/backup-verify.log
+
+# Weekly performance report
+0 8 * * 1 /usr/local/bin/acme-cli reports:weekly-performance --format=html --recipients=eng-leads@acme.dev 2>&1 | tee -a /var/log/acme/weekly-report.log
+
+# Purge soft-deleted records older than 90 days
+0 3 * * 6 /usr/local/bin/acme-cli db:purge-deleted --tables=orders,customers,products --older-than=90d --batch=500 2>&1 | tee -a /var/log/acme/purge-deleted.log
+
+# Rebuild full-text search indexes
+0 2 * * 0 /usr/local/bin/acme-cli search:rebuild --index=products,articles,faq --timeout=3600 2>&1 | tee -a /var/log/acme/search-rebuild.log
+
+# --- Monthly Tasks ---
+
+# Partition management: create next month's partitions, detach old ones
+0 0 25 * * /usr/local/bin/acme-cli db:manage-partitions --table=events --create-next=2 --detach-older-than=6m 2>&1 | tee -a /var/log/acme/partition-mgmt.log
+
+# Generate monthly billing report
+0 6 1 * * /usr/local/bin/acme-cli reports:monthly-billing --format=csv --output=s3://acme-reports/billing/ --recipients=finance@acme.dev 2>&1 | tee -a /var/log/acme/monthly-billing.log
+
+# Rotate database credentials (via Vault)
+0 2 1 * * /usr/local/bin/acme-cli secrets:rotate --target=database --vault-path=secret/acme/prod/db 2>&1 | tee -a /var/log/acme/secret-rotation.log
+
+# Full VACUUM on large tables (first Sunday, 3 AM)
+0 3 1-7 * 0 /usr/local/bin/acme-cli db:vacuum --tables=events,order_items --full=false --analyze 2>&1 | tee -a /var/log/acme/vacuum.log
+
+# Archive old order data to cold storage
+0 1 1 * * /usr/local/bin/acme-cli archive:orders --older-than=2y --dest=s3://acme-archive/orders/ --compress=zstd 2>&1 | tee -a /var/log/acme/archive-orders.log
+
+# --- Quarterly Tasks ---
+
+# Security audit: scan for unused accounts, stale API keys
+0 9 1 1,4,7,10 * /usr/local/bin/acme-cli audit:security --checks=stale-accounts,expired-keys,permission-drift --report=s3://acme-reports/security/ 2>&1 | tee -a /var/log/acme/security-audit.log

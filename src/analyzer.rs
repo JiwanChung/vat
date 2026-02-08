@@ -51,11 +51,6 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return ImageEngine::from_path(path).map(EngineState::Image);
     }
 
-    // INI/Properties config files
-    if matches!(ext.as_str(), "ini" | "cfg" | "properties" | "conf") {
-        return IniEngine::from_path(path).map(EngineState::Ini);
-    }
-
     // Dockerfile
     if file_name == "Dockerfile" || file_name.starts_with("Dockerfile.") {
         return DockerfileEngine::from_path(path).map(EngineState::Dockerfile);
@@ -76,8 +71,14 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return GitIgnoreEngine::from_path(path).map(EngineState::GitIgnore);
     }
 
+    // Logic files (must come before INI check since .tmux.conf has .conf extension)
     if is_logic_file(path, file_name) {
         return LogicEngine::from_path(path).map(EngineState::Logic);
+    }
+
+    // INI/Properties config files
+    if matches!(ext.as_str(), "ini" | "cfg" | "properties" | "conf") {
+        return IniEngine::from_path(path).map(EngineState::Ini);
     }
 
     if is_lock_file(path, file_name) {

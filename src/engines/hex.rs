@@ -94,7 +94,7 @@ impl HexEngine {
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -123,6 +123,10 @@ impl HexEngine {
 
                 let offset = line_idx * BYTES_PER_LINE;
                 let selected = line_idx == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    line_idx >= lo && line_idx <= hi
+                });
 
                 let bytes = self.get_line(line_idx).cloned().unwrap_or_default();
 
@@ -131,6 +135,8 @@ impl HexEngine {
                 // Address
                 let addr_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -148,6 +154,8 @@ impl HexEngine {
 
                     let byte_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else if byte == 0 {
                         Style::default().fg(Color::DarkGray)
                     } else if byte.is_ascii_alphabetic() {
@@ -178,6 +186,8 @@ impl HexEngine {
                 // ASCII representation
                 let ascii_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::White)
                 };

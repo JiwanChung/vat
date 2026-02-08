@@ -1,22 +1,141 @@
 {
-  "name": "vat",
-  "version": "0.1.0",
-  "description": "A semantic file viewer for the terminal",
-  "features": {
-    "formats": ["json", "yaml", "csv", "sqlite", "xml"],
-    "navigation": {
-      "vim_style": true,
-      "search": true,
-      "filter": true
+  "apiVersion": "v2",
+  "kind": "Application",
+  "metadata": {
+    "name": "acme-platform",
+    "namespace": "production",
+    "labels": {
+      "app.kubernetes.io/name": "acme-platform",
+      "app.kubernetes.io/version": "3.14.1",
+      "app.kubernetes.io/managed-by": "helm",
+      "team": "platform-engineering"
     },
-    "clipboard": {
-      "yank_line": "yy",
-      "visual_mode": "v"
+    "annotations": {
+      "deployment.kubernetes.io/revision": "47",
+      "kubectl.kubernetes.io/last-applied-configuration": "{...truncated...}"
     }
   },
-  "stats": {
-    "engines": 18,
-    "lines_of_code": 12000,
-    "stars": 42
+  "spec": {
+    "replicas": 3,
+    "strategy": {
+      "type": "RollingUpdate",
+      "rollingUpdate": {
+        "maxSurge": "25%",
+        "maxUnavailable": 0
+      }
+    },
+    "template": {
+      "containers": [
+        {
+          "name": "api-server",
+          "image": "ghcr.io/acme/api-server:3.14.1-alpine",
+          "ports": [
+            { "name": "http", "containerPort": 8080, "protocol": "TCP" },
+            { "name": "grpc", "containerPort": 9090, "protocol": "TCP" },
+            { "name": "metrics", "containerPort": 9102, "protocol": "TCP" }
+          ],
+          "env": [
+            { "name": "DATABASE_URL", "valueFrom": { "secretKeyRef": { "name": "db-credentials", "key": "url" } } },
+            { "name": "REDIS_HOST", "value": "redis-master.cache.svc.cluster.local" },
+            { "name": "LOG_LEVEL", "value": "info" },
+            { "name": "OTEL_EXPORTER_ENDPOINT", "value": "http://otel-collector:4317" },
+            { "name": "FEATURE_FLAGS_URL", "value": "http://flagsmith:8000/api/v1" }
+          ],
+          "resources": {
+            "requests": { "cpu": "500m", "memory": "512Mi" },
+            "limits": { "cpu": "2000m", "memory": "2Gi" }
+          },
+          "livenessProbe": {
+            "httpGet": { "path": "/healthz", "port": 8080 },
+            "initialDelaySeconds": 15,
+            "periodSeconds": 10,
+            "failureThreshold": 3
+          },
+          "readinessProbe": {
+            "httpGet": { "path": "/readyz", "port": 8080 },
+            "initialDelaySeconds": 5,
+            "periodSeconds": 5
+          },
+          "volumeMounts": [
+            { "name": "config", "mountPath": "/etc/acme", "readOnly": true },
+            { "name": "tls-certs", "mountPath": "/etc/tls", "readOnly": true },
+            { "name": "tmp", "mountPath": "/tmp" }
+          ]
+        },
+        {
+          "name": "sidecar-proxy",
+          "image": "envoyproxy/envoy:v1.28-latest",
+          "ports": [
+            { "name": "proxy", "containerPort": 8443, "protocol": "TCP" }
+          ],
+          "args": ["--config-path", "/etc/envoy/envoy.yaml", "--log-level", "warn"],
+          "resources": {
+            "requests": { "cpu": "100m", "memory": "128Mi" },
+            "limits": { "cpu": "500m", "memory": "256Mi" }
+          }
+        }
+      ],
+      "volumes": [
+        { "name": "config", "configMap": { "name": "acme-config" } },
+        { "name": "tls-certs", "secret": { "secretName": "acme-tls" } },
+        { "name": "tmp", "emptyDir": { "sizeLimit": "1Gi" } }
+      ],
+      "nodeSelector": {
+        "topology.kubernetes.io/zone": "us-east-1a",
+        "node.kubernetes.io/instance-type": "m5.xlarge"
+      },
+      "tolerations": [
+        {
+          "key": "dedicated",
+          "operator": "Equal",
+          "value": "platform",
+          "effect": "NoSchedule"
+        }
+      ],
+      "affinity": {
+        "podAntiAffinity": {
+          "preferredDuringSchedulingIgnoredDuringExecution": [
+            {
+              "weight": 100,
+              "podAffinityTerm": {
+                "labelSelector": {
+                  "matchExpressions": [
+                    { "key": "app", "operator": "In", "values": ["acme-platform"] }
+                  ]
+                },
+                "topologyKey": "kubernetes.io/hostname"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "monitoring": {
+    "dashboards": [
+      {
+        "name": "API Overview",
+        "panels": [
+          { "title": "Request Rate", "type": "graph", "query": "rate(http_requests_total{app='acme'}[5m])" },
+          { "title": "Error Rate", "type": "graph", "query": "rate(http_requests_total{app='acme',status=~'5..'}[5m])" },
+          { "title": "P99 Latency", "type": "stat", "query": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{app='acme'}[5m]))" },
+          { "title": "Active Connections", "type": "gauge", "query": "sum(grpc_server_started_total{app='acme'}) - sum(grpc_server_handled_total{app='acme'})" }
+        ]
+      },
+      {
+        "name": "Resource Utilization",
+        "panels": [
+          { "title": "CPU Usage", "type": "graph", "query": "rate(container_cpu_usage_seconds_total{pod=~'acme.*'}[5m])" },
+          { "title": "Memory Usage", "type": "graph", "query": "container_memory_working_set_bytes{pod=~'acme.*'}" },
+          { "title": "Network I/O", "type": "graph", "query": "rate(container_network_transmit_bytes_total{pod=~'acme.*'}[5m])" }
+        ]
+      }
+    ],
+    "alerts": [
+      { "name": "HighErrorRate", "expr": "rate(http_requests_total{status=~'5..'}[5m]) > 0.05", "for": "5m", "severity": "critical" },
+      { "name": "HighLatency", "expr": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2", "for": "10m", "severity": "warning" },
+      { "name": "PodCrashLooping", "expr": "rate(kube_pod_container_status_restarts_total[15m]) > 0", "for": "1h", "severity": "critical" },
+      { "name": "MemoryPressure", "expr": "container_memory_working_set_bytes / container_spec_memory_limit_bytes > 0.9", "for": "5m", "severity": "warning" }
+    ]
   }
 }

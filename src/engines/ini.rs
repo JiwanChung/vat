@@ -52,7 +52,7 @@ impl IniEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -72,11 +72,17 @@ impl IniEngine {
             .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
                 let line_no_str = format!("{:>width$} ", line_no, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::LightYellow)
                 };
@@ -87,11 +93,15 @@ impl IniEngine {
                     IniLine::Section(name) => {
                         let bracket_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::Magenta)
                         };
                         let name_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::Magenta).bold()
                         };
@@ -102,17 +112,23 @@ impl IniEngine {
                     IniLine::KeyValue { key, value } => {
                         let key_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                         } else {
                             Style::default().fg(Color::White).bold()
                         };
                         let eq_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray)
                         };
                         // Smart value coloring based on content
                         let val_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             let v = value.to_lowercase();
                             if v == "true" || v == "false" || v == "yes" || v == "no" || v == "on" || v == "off" {
@@ -132,6 +148,8 @@ impl IniEngine {
                     IniLine::Comment(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray).italic()
                         };
@@ -144,6 +162,7 @@ impl IniEngine {
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }

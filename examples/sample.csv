@@ -1,4 +1,26 @@
-id,name,score
-1,Ada,98
-2,Linus,95
-3,Ken,93
+id,timestamp,user_id,event_type,page_url,referrer,device_type,os,browser,country,city,session_duration_ms,is_authenticated,cart_value_usd,items_in_cart,response_time_ms,status_code,ab_test_group
+1,2024-12-15T08:23:11Z,usr_a1b2c3,page_view,/products/wireless-headphones,https://www.google.com/search?q=wireless+headphones,mobile,iOS 17.2,Safari 17.2,US,San Francisco,0,false,0.00,0,142,200,control
+2,2024-12-15T08:23:45Z,usr_a1b2c3,product_view,/products/wireless-headphones,/products,mobile,iOS 17.2,Safari 17.2,US,San Francisco,34000,false,0.00,0,89,200,control
+3,2024-12-15T08:24:02Z,usr_a1b2c3,add_to_cart,/products/wireless-headphones,,mobile,iOS 17.2,Safari 17.2,US,San Francisco,51000,false,79.99,1,203,200,control
+4,2024-12-15T08:25:30Z,usr_d4e5f6,page_view,/,https://news.ycombinator.com/item?id=38901234,desktop,Windows 11,Chrome 120,DE,Berlin,0,true,0.00,0,95,200,variant_a
+5,2024-12-15T08:25:33Z,usr_d4e5f6,page_view,/products,,desktop,Windows 11,Chrome 120,DE,Berlin,3000,true,0.00,0,110,200,variant_a
+6,2024-12-15T08:26:12Z,usr_d4e5f6,search,/search?q=mechanical+keyboard,,desktop,Windows 11,Chrome 120,DE,Berlin,42000,true,0.00,0,287,200,variant_a
+7,2024-12-15T08:26:58Z,usr_d4e5f6,product_view,/products/mechanical-keyboard-tkl,/search,desktop,Windows 11,Chrome 120,DE,Berlin,88000,true,0.00,0,76,200,variant_a
+8,2024-12-15T08:27:15Z,usr_d4e5f6,add_to_cart,/products/mechanical-keyboard-tkl,,desktop,Windows 11,Chrome 120,DE,Berlin,105000,true,149.00,1,198,200,variant_a
+9,2024-12-15T08:27:44Z,usr_d4e5f6,add_to_cart,/products/keycap-set-retro,,desktop,Windows 11,Chrome 120,DE,Berlin,134000,true,194.98,2,167,200,variant_a
+10,2024-12-15T08:28:01Z,usr_g7h8i9,page_view,/products/usb-c-hub,https://www.reddit.com/r/UsbCHacks,tablet,iPadOS 17.2,Safari 17.2,JP,Tokyo,0,false,0.00,0,312,200,variant_b
+11,2024-12-15T08:28:20Z,usr_d4e5f6,checkout_start,/checkout,,desktop,Windows 11,Chrome 120,DE,Berlin,170000,true,194.98,2,445,200,variant_a
+12,2024-12-15T08:28:55Z,usr_j0k1l2,page_view,/blog/best-monitors-2024,https://t.co/abc123,mobile,Android 14,Chrome 120,BR,Sao Paulo,0,false,0.00,0,189,200,control
+13,2024-12-15T08:29:30Z,usr_g7h8i9,product_view,/products/usb-c-hub,,tablet,iPadOS 17.2,Safari 17.2,JP,Tokyo,89000,false,0.00,0,102,200,variant_b
+14,2024-12-15T08:29:44Z,usr_d4e5f6,payment_submit,/checkout/payment,,desktop,Windows 11,Chrome 120,DE,Berlin,273000,true,194.98,2,1823,200,variant_a
+15,2024-12-15T08:29:48Z,usr_m3n4o5,page_view,/,direct,desktop,macOS 14.2,Firefox 121,CA,Toronto,0,true,0.00,0,88,200,variant_b
+16,2024-12-15T08:29:59Z,usr_d4e5f6,purchase_complete,/checkout/confirmation,,desktop,Windows 11,Chrome 120,DE,Berlin,288000,true,194.98,2,156,200,variant_a
+17,2024-12-15T08:30:10Z,usr_g7h8i9,page_view,/products/monitor-4k-27,/products/usb-c-hub,tablet,iPadOS 17.2,Safari 17.2,JP,Tokyo,129000,false,0.00,0,97,200,variant_b
+18,2024-12-15T08:30:22Z,usr_j0k1l2,page_view,/products/ultrawide-monitor,/blog/best-monitors-2024,mobile,Android 14,Chrome 120,BR,Sao Paulo,87000,false,0.00,0,201,200,control
+19,2024-12-15T08:31:05Z,usr_m3n4o5,page_view,/account/orders,,desktop,macOS 14.2,Firefox 121,CA,Toronto,77000,true,0.00,0,134,200,variant_b
+20,2024-12-15T08:31:45Z,usr_p6q7r8,page_view,/,,mobile,iOS 17.2,Safari 17.2,GB,London,0,false,0.00,0,156,200,control
+21,2024-12-15T08:32:01Z,usr_g7h8i9,add_to_cart,/products/monitor-4k-27,,tablet,iPadOS 17.2,Safari 17.2,JP,Tokyo,240000,false,449.00,1,178,200,variant_b
+22,2024-12-15T08:32:33Z,usr_p6q7r8,page_view,/products,,mobile,iOS 17.2,Safari 17.2,GB,London,48000,false,0.00,0,403,503,control
+23,2024-12-15T08:32:45Z,usr_j0k1l2,add_to_cart,/products/ultrawide-monitor,,mobile,Android 14,Chrome 120,BR,Sao Paulo,227000,false,699.00,1,212,200,control
+24,2024-12-15T08:33:10Z,usr_s9t0u1,page_view,/products/wireless-headphones,https://www.google.com/search?q=best+wireless+headphones+2024,desktop,Linux 6.7,Chrome 120,IN,Mumbai,0,false,0.00,0,267,200,variant_a
+25,2024-12-15T08:33:55Z,usr_p6q7r8,page_view,/products,,mobile,iOS 17.2,Safari 17.2,GB,London,130000,false,0.00,0,145,200,control

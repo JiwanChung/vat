@@ -13,6 +13,7 @@ struct HtmlRow {
     tag: String,
     id: String,
     class: String,
+    attrs: Vec<(String, String)>,
     text: String,
 }
 
@@ -56,7 +57,7 @@ impl HtmlEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _wrap: bool) {
         self.last_view_height = area.height as usize;
         let visible = self.visible_rows();
         let height = area.height.saturating_sub(1) as usize;
@@ -88,18 +89,27 @@ impl HtmlEngine {
 
         let mut rows = Vec::new();
         for (idx, row_idx) in slice.iter().enumerate() {
-            let row = &self.rows[*row_idx];
+            let row_data = &self.rows[*row_idx];
+            let abs_row = self.scroll + idx;
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                abs_row >= lo && abs_row <= hi
+            });
             let mut cells = Vec::new();
             cells.push(
-                Cell::from((self.scroll + idx + 1).to_string())
+                Cell::from((abs_row + 1).to_string())
                     .style(Style::default().fg(Color::DarkGray)),
             );
             cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
-            cells.push(Cell::from(indent_tag(row.depth, &row.tag)).style(Style::default().fg(Color::Cyan).bold()));
-            cells.push(Cell::from(row.id.clone()).style(Style::default().fg(Color::Magenta)));
-            cells.push(Cell::from(row.class.clone()).style(Style::default().fg(Color::Green)));
-            cells.push(Cell::from(row.text.clone()).style(Style::default().fg(Color::Yellow)));
-            rows.push(Row::new(cells));
+            cells.push(Cell::from(indent_tag(row_data.depth, &row_data.tag)).style(Style::default().fg(Color::Cyan).bold()));
+            cells.push(Cell::from(row_data.id.clone()).style(Style::default().fg(Color::Magenta)));
+            cells.push(Cell::from(row_data.class.clone()).style(Style::default().fg(Color::Green)));
+            cells.push(Cell::from(row_data.text.clone()).style(Style::default().fg(Color::Yellow)));
+            let mut table_row = Row::new(cells);
+            if in_visual {
+                table_row = table_row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+            }
+            rows.push(table_row);
         }
 
         let widths = vec![
@@ -284,34 +294,69 @@ impl HtmlEngine {
         self.visible_rows().len() + 1
     }
 
-    pub fn render_plain_lines(&self, width: u16) -> Vec<Line<'static>> {
-        let inner_width = width as usize;
-        let (w_num, w_sep, w_tag, w_id, w_class, w_text) = html_column_widths(inner_width);
+    pub fn render_plain_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        let visible = self.visible_rows();
+        let num_width = visible.len().max(1).to_string().len().max(2);
+        let sep_style = Style::default().fg(Color::LightBlue);
+
         let mut lines = Vec::new();
 
-        let header_style = Style::default().fg(Color::Black).bg(Color::LightBlue);
-        let headers = vec![
-            Span::styled(pad_cell("#", w_num), header_style),
-            Span::styled(pad_cell("│", w_sep), Style::default().fg(Color::LightBlue)),
-            Span::styled(pad_cell("Tag", w_tag), header_style),
-            Span::styled(pad_cell("Id", w_id), header_style),
-            Span::styled(pad_cell("Class", w_class), header_style),
-            Span::styled(pad_cell("Text", w_text), header_style),
-        ];
-        lines.push(Line::from(headers));
-
-        for (idx, row_idx) in self.visible_rows().iter().enumerate() {
+        for (idx, row_idx) in visible.iter().enumerate() {
             let row = &self.rows[*row_idx];
-            let spans = vec![
-                Span::styled(pad_cell(&(idx + 1).to_string(), w_num), Style::default().fg(Color::LightYellow)),
-                Span::styled(pad_cell("│", w_sep), Style::default().fg(Color::LightBlue)),
-                Span::styled(pad_cell(&indent_tag(row.depth, &row.tag), w_tag), Style::default().fg(Color::LightGreen)),
-                Span::styled(pad_cell(&row.id, w_id), Style::default().fg(Color::LightCyan)),
-                Span::styled(pad_cell(&row.class, w_class), Style::default().fg(Color::LightCyan)),
-                Span::styled(pad_cell(&row.text, w_text), Style::default().fg(Color::White)),
+            let indent = "  ".repeat(row.depth);
+
+            let mut spans = vec![
+                Span::styled(
+                    format!("{:>width$} ", idx + 1, width = num_width),
+                    Style::default().fg(Color::LightYellow),
+                ),
+                Span::styled("│ ", sep_style),
+                Span::raw(indent),
+                Span::styled(row.tag.clone(), Style::default().fg(Color::LightGreen)),
             ];
+
+            if !row.id.is_empty() {
+                spans.push(Span::styled(
+                    format!("#{}", row.id),
+                    Style::default().fg(Color::LightMagenta),
+                ));
+            }
+
+            if !row.class.is_empty() {
+                let class_str: String = row
+                    .class
+                    .split_whitespace()
+                    .map(|c| format!(".{}", c))
+                    .collect();
+                spans.push(Span::styled(
+                    class_str,
+                    Style::default().fg(Color::LightYellow),
+                ));
+            }
+
+            if !row.attrs.is_empty() {
+                let attr_str: String = row
+                    .attrs
+                    .iter()
+                    .map(|(k, v)| format!("{}=\"{}\"", k, v))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                spans.push(Span::styled(
+                    format!("({})", attr_str),
+                    Style::default().fg(Color::DarkGray),
+                ));
+            }
+
+            if !row.text.is_empty() {
+                spans.push(Span::styled(
+                    format!("  {}", row.text),
+                    Style::default().fg(Color::White),
+                ));
+            }
+
             lines.push(Line::from(spans));
         }
+
         lines
     }
 }
@@ -337,17 +382,37 @@ impl HtmlEngine {
 }
 
 fn collect_elements(node: ElementRef<'_>, depth: usize, rows: &mut Vec<HtmlRow>) {
-    let tag = node.value().name().to_string();
-    let id = node.value().attr("id").unwrap_or("").to_string();
-    let class = node.value().attr("class").unwrap_or("").to_string();
-    let text = node.text().collect::<Vec<_>>().join(" ");
-    let text = text.trim().to_string();
-    let text = truncate_text(&text, 60);
+    let el = node.value();
+    let tag = el.name().to_string();
+    let mut id = String::new();
+    let mut class = String::new();
+    let mut attrs = Vec::new();
+    for (name, value) in el.attrs() {
+        match name {
+            "id" => id = value.to_string(),
+            "class" => class = value.to_string(),
+            _ => attrs.push((name.to_string(), value.to_string())),
+        }
+    }
+    // Only collect direct text children (not text from nested elements)
+    // Normalize whitespace: collapse newlines and multiple spaces into single spaces
+    let text: String = node
+        .children()
+        .filter_map(|child| {
+            child
+                .value()
+                .as_text()
+                .map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
+        })
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
     rows.push(HtmlRow {
         depth,
         tag,
         id,
         class,
+        attrs,
         text,
     });
     for child in node.children() {
@@ -360,40 +425,6 @@ fn collect_elements(node: ElementRef<'_>, depth: usize, rows: &mut Vec<HtmlRow>)
 fn indent_tag(depth: usize, tag: &str) -> String {
     let indent = "  ".repeat(depth);
     format!("{}<{}>", indent, tag)
-}
-
-fn truncate_text(text: &str, max: usize) -> String {
-    if text.len() <= max {
-        return text.to_string();
-    }
-    let mut out = text.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
-}
-
-fn html_column_widths(inner_width: usize) -> (usize, usize, usize, usize, usize, usize) {
-    let w_num = 5;
-    let w_sep = 2;
-    let w_tag = 16;
-    let w_id = 18;
-    let w_class = 20;
-    let used = w_num + w_sep + w_tag + w_id + w_class;
-    let w_text = inner_width.saturating_sub(used).max(12);
-    (w_num, w_sep, w_tag, w_id, w_class, w_text)
-}
-
-fn pad_cell(value: &str, width: usize) -> String {
-    let mut out = String::new();
-    for ch in value.chars() {
-        if out.len() >= width {
-            break;
-        }
-        out.push(ch);
-    }
-    if out.len() < width {
-        out.push_str(&" ".repeat(width - out.len()));
-    }
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {
@@ -426,6 +457,9 @@ impl HtmlEngine {
                 || row.id.to_lowercase().contains(&lower)
                 || row.class.to_lowercase().contains(&lower)
                 || row.text.to_lowercase().contains(&lower)
+                || row.attrs.iter().any(|(k, v)| {
+                    k.to_lowercase().contains(&lower) || v.to_lowercase().contains(&lower)
+                })
             {
                 self.selection = idx;
                 break;

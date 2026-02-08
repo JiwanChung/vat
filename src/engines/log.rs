@@ -77,7 +77,7 @@ impl LogEngine {
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -105,11 +105,17 @@ impl LogEngine {
                 let (line_no, entry) = &self.entries[entry_idx];
                 let row = self.scroll + display_idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
                 let line_no_str = format!("{:>width$} ", line_no, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -120,6 +126,8 @@ impl LogEngine {
                 if let Some(ts) = &entry.timestamp {
                     let ts_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::DarkGray)
                     };
@@ -137,6 +145,8 @@ impl LogEngine {
                     };
                     let level_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                     } else {
                         Style::default().fg(color).bold()
                     };
@@ -147,6 +157,8 @@ impl LogEngine {
                 if let Some(src) = &entry.source {
                     let src_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(Color::Cyan)
                     };
@@ -156,15 +168,18 @@ impl LogEngine {
                 // Message
                 let msg_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::White)
                 };
-                spans.push(Span::styled(truncate(&entry.message, 80), msg_style));
+                spans.push(Span::styled(entry.message.clone(), msg_style));
 
                 Line::from(spans)
             })
             .collect();
 
+        let display = if wrap { super::wrap_lines(display, area.width as usize) } else { display };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(display).block(block), area);
     }
@@ -326,6 +341,11 @@ impl LogEngine {
                 ));
                 spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
+                // Timestamp
+                if let Some(ts) = &entry.timestamp {
+                    spans.push(Span::styled(format!("{} ", ts), Style::default().fg(Color::DarkGray)));
+                }
+
                 if let Some(level) = entry.level {
                     let (text, color) = match level {
                         LogLevel::Debug => ("DBG", Color::Gray),
@@ -335,6 +355,11 @@ impl LogEngine {
                         LogLevel::Fatal => ("FTL", Color::LightRed),
                     };
                     spans.push(Span::styled(format!("[{}] ", text), Style::default().fg(color).bold()));
+                }
+
+                // Source
+                if let Some(src) = &entry.source {
+                    spans.push(Span::styled(format!("{}: ", src), Style::default().fg(Color::Cyan)));
                 }
 
                 spans.push(Span::styled(entry.message.clone(), Style::default().fg(Color::White)));
@@ -432,15 +457,6 @@ fn level_priority(level: LogLevel) -> u8 {
         LogLevel::Error => 3,
         LogLevel::Fatal => 4,
     }
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn page_jump(view_height: usize) -> usize {

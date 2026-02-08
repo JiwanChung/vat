@@ -100,7 +100,7 @@ impl TextEngine {
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -159,6 +159,7 @@ impl TextEngine {
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }

@@ -1,5 +1,295 @@
-app "Vat" active=true version=1 {
-  metadata tags="tui" tags="rust" tags="viewer" {
-    stats files=12 stars=1200
-  }
+// ===========================================
+// ACME Platform Infrastructure Configuration
+// KDL Document (https://kdl.dev)
+// ===========================================
+
+// Top-level service definition
+service "acme-api" version="2.8.0" {
+    description "E-commerce platform REST + gRPC API"
+    team "backend-core"
+    tier "critical"
+
+    // Build configuration
+    build {
+        image "rust:1.78-bookworm"
+        target "x86_64-unknown-linux-musl"
+        features "postgres" "redis" "kafka" "metrics"
+        profile "release" lto=true codegen-units=1
+        cache {
+            registry "sccache://build-cache.internal:9000"
+            ttl "7d"
+        }
+    }
+
+    // Runtime configuration per environment
+    environment "production" {
+        replicas 5
+        cpu "2000m"
+        memory "4Gi"
+
+        autoscaling enabled=true {
+            min-replicas 3
+            max-replicas 20
+            target-cpu-percent 70
+            target-memory-percent 80
+            scale-down-delay "5m"
+            behavior {
+                scale-up max-pods=4 period="60s"
+                scale-down max-pods=1 period="300s"
+            }
+        }
+
+        health {
+            liveness path="/healthz" port=8080 period="10s" threshold=3
+            readiness path="/readyz" port=8080 period="5s" threshold=1
+            startup path="/healthz" port=8080 period="2s" failure-threshold=30
+        }
+
+        ports {
+            http 8080
+            grpc 9090
+            metrics 9102
+        }
+
+        env {
+            DATABASE_URL "postgres://acme@pg-primary:5432/acme"
+            REDIS_URL "redis://redis-sentinel:26379"
+            KAFKA_BROKERS "kafka-0:9092,kafka-1:9092,kafka-2:9092"
+            LOG_LEVEL "info"
+            OTEL_ENDPOINT "http://otel-collector:4317"
+        }
+
+        secrets from="vault" {
+            path "secret/data/acme/production"
+            keys "DATABASE_PASSWORD" "STRIPE_API_KEY" "JWT_PRIVATE_KEY"
+            rotation-period "30d"
+        }
+
+        volumes {
+            config mount="/etc/acme" source="configmap/acme-config" read-only=true
+            tls mount="/etc/ssl/acme" source="secret/acme-tls" read-only=true
+            tmp mount="/tmp" type="emptyDir" size-limit="1Gi"
+        }
+    }
+
+    environment "staging" {
+        replicas 2
+        cpu "500m"
+        memory "1Gi"
+        autoscaling enabled=false
+    }
+
+    environment "development" {
+        replicas 1
+        cpu "250m"
+        memory "512Mi"
+    }
+}
+
+// Database cluster configuration
+database "acme-postgres" {
+    engine "postgresql" version="16.2"
+    team "platform-data"
+
+    primary {
+        instance-type "r6g.2xlarge"
+        storage "500Gi" type="gp3" iops=12000 throughput="500MBps"
+        parameters {
+            shared-buffers "16GB"
+            work-mem "256MB"
+            effective-cache-size "48GB"
+            max-connections 200
+            wal-level "replica"
+            max-wal-senders 10
+            checkpoint-timeout "15min"
+        }
+    }
+
+    replicas count=2 {
+        instance-type "r6g.xlarge"
+        storage "500Gi" type="gp3"
+        replication mode="async" lag-threshold="30s"
+    }
+
+    backup {
+        provider "pgbackrest"
+        schedule "0 2 * * *"
+        retention full=7 differential=30 wal="14d"
+        storage "s3://acme-backups/postgres" region="us-east-1"
+        encryption enabled=true algorithm="aes-256-cbc"
+    }
+
+    monitoring {
+        exporter "prometheus-postgres-exporter" port=9187
+        alerts {
+            replication-lag threshold="60s" severity="critical"
+            connection-saturation threshold=0.85 severity="warning"
+            disk-usage threshold=0.80 severity="warning"
+            long-running-queries threshold="30s" severity="info"
+        }
+    }
+
+    maintenance {
+        window day="sunday" start="03:00" duration="2h" timezone="UTC"
+        auto-vacuum enabled=true {
+            scale-factor 0.05
+            analyze-scale-factor 0.025
+            cost-delay "2ms"
+        }
+    }
+}
+
+// Cache cluster
+cache "acme-redis" {
+    engine "redis" version="7.2"
+
+    sentinel enabled=true {
+        quorum 2
+        down-after "5000ms"
+        failover-timeout "60000ms"
+        nodes 3
+    }
+
+    node {
+        instance-type "r6g.large"
+        memory "13Gi"
+        maxmemory-policy "allkeys-lru"
+        persistence {
+            rdb enabled=true frequency="900 1 300 10 60 10000"
+            aof enabled=true fsync="everysec"
+        }
+    }
+
+    cluster enabled=false
+}
+
+// Message queue
+queue "acme-kafka" {
+    engine "kafka" version="3.7"
+    team "platform-data"
+
+    brokers count=3 {
+        instance-type "m6g.xlarge"
+        storage "1Ti" type="gp3"
+    }
+
+    topics {
+        topic "orders" partitions=12 replication=3 {
+            retention "7d"
+            cleanup "delete"
+            compression "zstd"
+            max-message-size "1MB"
+        }
+        topic "events" partitions=24 replication=3 {
+            retention "3d"
+            cleanup "delete"
+            compression "lz4"
+        }
+        topic "notifications" partitions=6 replication=3 {
+            retention "1d"
+        }
+        topic "dead-letter" partitions=3 replication=3 {
+            retention "30d"
+            cleanup "compact"
+        }
+    }
+
+    schema-registry {
+        url "http://schema-registry:8081"
+        compatibility "BACKWARD"
+    }
+}
+
+// Observability stack
+observability {
+    tracing {
+        provider "opentelemetry"
+        collector endpoint="http://otel-collector:4317" protocol="grpc"
+        sampling rate=0.1 parent-based=true
+        export {
+            backend "jaeger" endpoint="http://jaeger:14268/api/traces"
+            backend "datadog" api-key-from="vault:secret/datadog/api-key"
+        }
+    }
+
+    metrics {
+        provider "prometheus"
+        scrape-interval "15s"
+        retention "30d"
+        remote-write {
+            endpoint "https://prometheus-remote.internal/api/v1/write"
+            queue-config capacity=10000 max-shards=50
+        }
+    }
+
+    logging {
+        format "json"
+        level "info"
+        output "stdout"
+        aggregator {
+            provider "loki"
+            endpoint "http://loki:3100/loki/api/v1/push"
+            labels "app" "env" "version"
+        }
+    }
+
+    alerting {
+        provider "alertmanager"
+        routes {
+            route match="severity=critical" receiver="pagerduty" repeat="5m"
+            route match="severity=warning" receiver="slack" repeat="1h"
+            route match="severity=info" receiver="email" repeat="24h"
+        }
+    }
+}
+
+// CI/CD pipeline definition
+pipeline "acme-api" {
+    trigger {
+        branch "main" "release/*"
+        path-include "src/**" "Cargo.toml" "Cargo.lock" "migrations/**"
+        path-exclude "docs/**" "*.md" ".github/**"
+    }
+
+    stage "test" {
+        parallel true
+        step "lint" command="cargo clippy --all-targets -- -D warnings"
+        step "format" command="cargo fmt --check"
+        step "unit-tests" command="cargo test --lib --bins"
+        step "integration-tests" command="cargo test --test '*'" {
+            services "postgres:16" "redis:7" "kafka:3.7"
+            timeout "10m"
+        }
+    }
+
+    stage "build" depends-on="test" {
+        step "compile" command="cargo build --release --target x86_64-unknown-linux-musl"
+        step "docker" {
+            image-name "acme/api"
+            tag-with "git-sha" "semver" "latest"
+            push-to "ecr.us-east-1.amazonaws.com/acme"
+            scan enabled=true severity-threshold="high"
+        }
+    }
+
+    stage "deploy-staging" depends-on="build" {
+        environment "staging"
+        strategy "rolling" max-surge=1 max-unavailable=0
+        approval required=false
+        smoke-test command="./scripts/smoke-test.sh staging" timeout="5m"
+    }
+
+    stage "deploy-production" depends-on="deploy-staging" {
+        environment "production"
+        strategy "canary" {
+            steps 10 25 50 100
+            interval "5m"
+            analysis {
+                metric "error_rate" threshold=0.01 comparison="less_than"
+                metric "p99_latency_ms" threshold=200 comparison="less_than"
+            }
+            rollback auto=true
+        }
+        approval required=true approvers="backend-leads" timeout="24h"
+    }
 }

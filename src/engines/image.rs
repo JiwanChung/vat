@@ -86,7 +86,7 @@ impl ImageEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -104,15 +104,23 @@ impl ImageEngine {
             .map(|(idx, line)| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let label_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::LightCyan)
                 };
 
                 let value_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::White)
                 };
@@ -120,17 +128,18 @@ impl ImageEngine {
                 if line.label.is_empty() {
                     Line::from("")
                 } else if line.label.starts_with("---") {
-                    Line::from(Span::styled(&line.label, Style::default().fg(Color::DarkGray)))
+                    Line::from(Span::styled(line.label.clone(), Style::default().fg(Color::DarkGray)))
                 } else {
                     Line::from(vec![
                         Span::styled(format!("{:<20}", line.label), label_style),
-                        Span::styled(&line.value, value_style),
+                        Span::styled(line.value.clone(), value_style),
                     ])
                 }
             })
             .collect();
 
         let block = Block::default().borders(Borders::NONE);
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }
 

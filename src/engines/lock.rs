@@ -56,7 +56,7 @@ impl LockEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _wrap: bool) {
         let height = area.height.saturating_sub(1) as usize;
         if self.selection < self.scroll {
             self.scroll = self.selection;
@@ -87,28 +87,37 @@ impl LockEngine {
 
         let mut rows = Vec::new();
         for (idx, entry) in slice.iter().enumerate() {
+            let abs_row = self.scroll + idx;
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                abs_row >= lo && abs_row <= hi
+            });
             let mut cells = Vec::new();
             cells.push(
-                Cell::from((self.scroll + idx + 1).to_string())
+                Cell::from((abs_row + 1).to_string())
                     .style(Style::default().fg(Color::DarkGray)),
             );
             cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
-            cells.push(Cell::from(truncate(&entry.name, 22)).style(Style::default().fg(Color::Cyan).bold()));
-            cells.push(Cell::from(truncate(&entry.version, 12)).style(Style::default().fg(Color::Magenta)));
-            cells.push(Cell::from(truncate(&entry.source, 28)).style(Style::default().fg(Color::Green)));
-            cells.push(Cell::from(truncate(&entry.checksum, 16)).style(Style::default().fg(Color::DarkGray)));
-            cells.push(Cell::from(truncate(&entry.dependencies.join(", "), 40)).style(Style::default().fg(Color::Yellow)));
-            rows.push(Row::new(cells));
+            cells.push(Cell::from(entry.name.clone()).style(Style::default().fg(Color::Cyan).bold()));
+            cells.push(Cell::from(entry.version.clone()).style(Style::default().fg(Color::Magenta)));
+            cells.push(Cell::from(entry.source.clone()).style(Style::default().fg(Color::Green)));
+            cells.push(Cell::from(entry.checksum.clone()).style(Style::default().fg(Color::DarkGray)));
+            cells.push(Cell::from(entry.dependencies.join(", ")).style(Style::default().fg(Color::Yellow)));
+            let mut row = Row::new(cells);
+            if in_visual {
+                row = row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+            }
+            rows.push(row);
         }
 
         let widths = vec![
             Constraint::Length(6),
             Constraint::Length(2),
-            Constraint::Length(24),
-            Constraint::Length(12),
-            Constraint::Length(28),
-            Constraint::Length(16),
-            Constraint::Min(12),
+            Constraint::Min(10),
+            Constraint::Min(8),
+            Constraint::Min(10),
+            Constraint::Min(10),
+            Constraint::Min(10),
         ];
         let table = Table::new(rows, widths)
             .header(header)
@@ -475,15 +484,6 @@ fn package_name_from_path(path: &str) -> String {
 
 fn dep_name_only(dep: &str) -> String {
     dep.split_whitespace().next().unwrap_or(dep).to_string()
-}
-
-fn truncate(value: &str, max: usize) -> String {
-    if value.len() <= max {
-        return value.to_string();
-    }
-    let mut out = value.chars().take(max.saturating_sub(3)).collect::<String>();
-    out.push_str("...");
-    out
 }
 
 fn join_with_sep(mut spans: Vec<Span<'static>>, sep: &str) -> Vec<Span<'static>> {

@@ -1,6 +1,6 @@
 use crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 
 mod archive;
 mod dockerfile;
@@ -162,27 +162,27 @@ impl EngineState {
         }
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         match self {
-            EngineState::Tree(engine) => engine.render(frame, area),
-            EngineState::Table(engine) => engine.render(frame, area),
-            EngineState::Logic(engine) => engine.render(frame, area),
-            EngineState::Syntax(engine) => engine.render(frame, area),
-            EngineState::Html(engine) => engine.render(frame, area),
-            EngineState::Lock(engine) => engine.render(frame, area),
-            EngineState::Jsonl(engine) => engine.render(frame, area),
-            EngineState::Text(engine) => engine.render(frame, area),
-            EngineState::Env(engine) => engine.render(frame, area),
-            EngineState::Ini(engine) => engine.render(frame, area),
-            EngineState::Xml(engine) => engine.render(frame, area),
-            EngineState::Dockerfile(engine) => engine.render(frame, area),
-            EngineState::Makefile(engine) => engine.render(frame, area),
-            EngineState::Log(engine) => engine.render(frame, area),
-            EngineState::GitIgnore(engine) => engine.render(frame, area),
-            EngineState::Sqlite(engine) => engine.render(frame, area),
-            EngineState::Archive(engine) => engine.render(frame, area),
-            EngineState::Image(engine) => engine.render(frame, area),
-            EngineState::Hex(engine) => engine.render(frame, area),
+            EngineState::Tree(engine) => engine.render(frame, area, wrap),
+            EngineState::Table(engine) => engine.render(frame, area, wrap),
+            EngineState::Logic(engine) => engine.render(frame, area, wrap),
+            EngineState::Syntax(engine) => engine.render(frame, area, wrap),
+            EngineState::Html(engine) => engine.render(frame, area, wrap),
+            EngineState::Lock(engine) => engine.render(frame, area, wrap),
+            EngineState::Jsonl(engine) => engine.render(frame, area, wrap),
+            EngineState::Text(engine) => engine.render(frame, area, wrap),
+            EngineState::Env(engine) => engine.render(frame, area, wrap),
+            EngineState::Ini(engine) => engine.render(frame, area, wrap),
+            EngineState::Xml(engine) => engine.render(frame, area, wrap),
+            EngineState::Dockerfile(engine) => engine.render(frame, area, wrap),
+            EngineState::Makefile(engine) => engine.render(frame, area, wrap),
+            EngineState::Log(engine) => engine.render(frame, area, wrap),
+            EngineState::GitIgnore(engine) => engine.render(frame, area, wrap),
+            EngineState::Sqlite(engine) => engine.render(frame, area, wrap),
+            EngineState::Archive(engine) => engine.render(frame, area, wrap),
+            EngineState::Image(engine) => engine.render(frame, area, wrap),
+            EngineState::Hex(engine) => engine.render(frame, area, wrap),
         }
     }
 
@@ -442,4 +442,88 @@ impl EngineState {
             EngineState::Hex(engine) => engine.render_plain_lines(width),
         }
     }
+}
+
+/// Wrap lines while preserving the gutter (line numbers + "│ " separator).
+/// Continuation lines get blank gutter padding to maintain visual alignment.
+pub(crate) fn wrap_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'static>> {
+    if width == 0 {
+        return lines;
+    }
+    let mut result = Vec::new();
+    for line in lines {
+        let total_chars: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+        if total_chars <= width {
+            result.push(line);
+            continue;
+        }
+
+        // Detect gutter pattern (line number + "│ ")
+        let (gutter_width, cont_spans) = detect_gutter(&line.spans);
+
+        let mut rows: Vec<Vec<Span<'static>>> = Vec::new();
+        let mut current_row: Vec<Span<'static>> = Vec::new();
+        let mut col = 0usize;
+
+        for span in line.spans {
+            let style = span.style;
+            let mut buf = String::new();
+
+            for ch in span.content.chars() {
+                if col >= width {
+                    if !buf.is_empty() {
+                        current_row.push(Span::styled(buf.clone(), style));
+                        buf.clear();
+                    }
+                    rows.push(current_row);
+                    current_row = Vec::new();
+                    if gutter_width > 0 && gutter_width < width {
+                        current_row.extend(cont_spans.clone());
+                        col = gutter_width;
+                    } else {
+                        col = 0;
+                    }
+                }
+                buf.push(ch);
+                col += 1;
+            }
+
+            if !buf.is_empty() {
+                current_row.push(Span::styled(buf, style));
+            }
+        }
+
+        if !current_row.is_empty() {
+            rows.push(current_row);
+        }
+
+        for row in rows {
+            result.push(Line::from(row));
+        }
+    }
+    result
+}
+
+/// Detect line-number gutter by finding a "│ " separator in the first few spans.
+/// Returns (total_gutter_width, continuation_spans) where continuation_spans
+/// replaces the line number with blank padding but keeps the "│ " separator.
+fn detect_gutter(spans: &[Span<'static>]) -> (usize, Vec<Span<'static>>) {
+    let mut pre_width = 0;
+    for (i, span) in spans.iter().enumerate() {
+        if i > 2 {
+            break;
+        }
+        let span_width = span.content.chars().count();
+        if *span.content == *"│ " {
+            let total = pre_width + span_width;
+            let mut continuation = Vec::new();
+            if pre_width > 0 {
+                continuation.push(Span::raw(" ".repeat(pre_width)));
+            }
+            continuation.push(Span::styled(span.content.to_string(), span.style));
+            return (total, continuation);
+        }
+        pre_width += span_width;
+    }
+    (0, Vec::new())
 }

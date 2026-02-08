@@ -83,9 +83,9 @@ cargo install --path .
 ### Tabular Data
 | Format | Extensions | Features |
 |--------|------------|----------|
-| CSV | `.csv` | Table view, column alignment, virtual scrolling |
-| TSV | `.tsv` | Table view, column alignment |
-| Parquet | `.parquet` | Table view, schema inspection |
+| CSV | `.csv` | Content-aware columns, horizontal scrolling, row detail view |
+| TSV | `.tsv` | Content-aware columns, horizontal scrolling, row detail view |
+| Parquet | `.parquet` | Content-aware columns, horizontal scrolling, schema inspection |
 | JSON Lines | `.jsonl`, `.ndjson` | Record-by-record viewing, expandable objects |
 
 ### Databases & Archives
@@ -180,10 +180,23 @@ vat file.json | head            # Auto-detects pipe, outputs raw
 
 | Key | Action |
 |-----|--------|
-| `Enter` | Expand/collapse node |
+| `Enter` | Expand/collapse node (trees) / Row detail view (tables) |
+| `Esc` | Exit detail view |
 | `s` | Toggle view mode (schema/data, secrets) |
 | `e` | Jump to next section/heading |
 | `Tab` | Switch tables (SQLite) |
+
+### Table Viewer (CSV/TSV/Parquet)
+
+| Key | Action |
+|-----|--------|
+| `h` / `←` | Scroll columns left |
+| `l` / `→` | Scroll columns right |
+| `H` | Jump to first column |
+| `L` | Jump to last column |
+| `Enter` | Toggle row detail view |
+| `Esc` | Exit detail view |
+| `n` / `N` | Next/previous row (in detail view) |
 
 ### Log Viewer
 
@@ -225,7 +238,7 @@ Press `s` to toggle between schema view and table data. Use `Tab` to switch tabl
 vat sales_data.csv
 ```
 
-Scroll through thousands of rows with smooth navigation. Columns stay aligned.
+Columns auto-size to fit content. Scroll horizontally with `h/l`, press `Enter` for a full row detail view.
 
 ### Inspecting Docker Images
 

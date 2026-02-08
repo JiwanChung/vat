@@ -1,10 +1,136 @@
-project = "Vat"
-version = 1
-active = true
+# Rust workspace configuration (Cargo.toml style)
 
-[metadata]
-tags = ["tui", "rust", "viewer"]
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/api",
+    "crates/worker",
+    "crates/cli",
+    "crates/migrations",
+]
+default-members = ["crates/cli"]
 
-[metadata.stats]
-files = 12
-stars = 1200
+[workspace.package]
+version = "0.14.2"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/acme/platform"
+homepage = "https://acme.dev"
+authors = ["ACME Platform Team <platform@acme.dev>"]
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.36", features = ["full"] }
+tokio-stream = "0.1"
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "ws"] }
+axum-extra = { version = "0.9", features = ["typed-header", "cookie"] }
+tower = { version = "0.4", features = ["full"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "request-id"] }
+hyper = { version = "1.0", features = ["full"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json", "migrate"] }
+redis = { version = "0.25", features = ["tokio-comp", "connection-manager"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = { version = "0.22", features = ["metrics", "trace"] }
+opentelemetry-otlp = { version = "0.15", features = ["tonic"] }
+metrics = "0.22"
+metrics-exporter-prometheus = "0.14"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Auth
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# Misc
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+url = { version = "2", features = ["serde"] }
+regex = "1"
+dotenvy = "0.15"
+rand = "0.8"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "warn"
+todo = "warn"
+dbg_macro = "warn"
+
+# --- Per-crate configurations ---
+
+[package]
+name = "acme-cli"
+version.workspace = true
+edition.workspace = true
+description = "CLI tool for the ACME platform"
+default-run = "acme"
+
+[[bin]]
+name = "acme"
+path = "crates/cli/src/main.rs"
+
+[[bin]]
+name = "acme-worker"
+path = "crates/worker/src/main.rs"
+
+[dependencies]
+acme-core = { path = "crates/core" }
+acme-api = { path = "crates/api" }
+tokio.workspace = true
+clap = { version = "4", features = ["derive", "env"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dotenvy.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
+proptest = "1"
+wiremock = "0.6"
+testcontainers = { version = "0.15", features = ["postgres", "redis"] }
+
+[[bench]]
+name = "order_processing"
+harness = false
+
+[[bench]]
+name = "serialization"
+harness = false
+
+[profile.dev]
+opt-level = 0
+debug = true
+split-debuginfo = "unpacked"
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[profile.release-debug]
+inherits = "release"
+debug = true
+strip = "none"

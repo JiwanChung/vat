@@ -3,16 +3,247 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Vat HTML Example</title>
+  <meta name="description" content="ACME Dashboard - Real-time analytics and monitoring for your applications" />
+  <meta property="og:title" content="ACME Dashboard" />
+  <meta property="og:image" content="https://acme.dev/og-image.png" />
+  <title>ACME Dashboard</title>
+  <link rel="stylesheet" href="/assets/css/main.css" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <style>
-    body { font-family: serif; color: #222; }
-    .card { border: 2px solid #ff6b35; padding: 1rem; }
+    :root { --primary: #2563eb; --danger: #dc2626; --success: #16a34a; --muted: #6b7280; }
+    body { font-family: Inter, system-ui, sans-serif; margin: 0; background: #f9fafb; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
   </style>
+  <script type="module" src="/assets/js/app.js" defer></script>
 </head>
 <body>
-  <div class="card">
-    <h1>Vat</h1>
-    <p>HTML sample file.</p>
-  </div>
+  <a href="#main-content" class="sr-only">Skip to main content</a>
+
+  <!-- Navigation -->
+  <nav id="main-nav" class="navbar" role="navigation" aria-label="Main navigation">
+    <div class="navbar-brand">
+      <a href="/" class="logo" aria-label="ACME Home">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="16" cy="16" r="14" stroke="currentColor" stroke-width="2" />
+          <path d="M10 22L16 10L22 22" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+        <span>ACME</span>
+      </a>
+    </div>
+    <ul class="nav-links" role="menubar">
+      <li role="none"><a href="/dashboard" role="menuitem" class="active" aria-current="page">Dashboard</a></li>
+      <li role="none"><a href="/analytics" role="menuitem">Analytics</a></li>
+      <li role="none"><a href="/deployments" role="menuitem">Deployments</a></li>
+      <li role="none">
+        <button role="menuitem" aria-haspopup="true" aria-expanded="false">
+          Settings
+          <svg class="icon-chevron" width="12" height="12" aria-hidden="true"><use href="#icon-chevron-down" /></svg>
+        </button>
+        <ul role="menu" class="dropdown" aria-label="Settings submenu">
+          <li role="none"><a href="/settings/team" role="menuitem">Team</a></li>
+          <li role="none"><a href="/settings/billing" role="menuitem">Billing</a></li>
+          <li role="none"><a href="/settings/integrations" role="menuitem">Integrations</a></li>
+          <li role="none"><a href="/settings/api-keys" role="menuitem">API Keys</a></li>
+        </ul>
+      </li>
+    </ul>
+    <div class="nav-actions">
+      <button class="btn btn-icon" aria-label="Notifications" data-badge="3">
+        <svg width="20" height="20" aria-hidden="true"><use href="#icon-bell" /></svg>
+      </button>
+      <div class="avatar-menu" data-controller="dropdown">
+        <button aria-label="User menu" aria-haspopup="true" aria-expanded="false">
+          <img src="/avatars/user-42.jpg" alt="" width="32" height="32" class="avatar" loading="lazy" />
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Main Content -->
+  <main id="main-content" class="dashboard-layout">
+    <!-- Sidebar -->
+    <aside class="sidebar" aria-label="Dashboard sidebar">
+      <div class="sidebar-section">
+        <h2 class="sidebar-heading">Projects</h2>
+        <ul class="project-list">
+          <li class="project-item active">
+            <span class="status-dot status-healthy" aria-label="Healthy"></span>
+            <a href="/projects/acme-web">acme-web</a>
+            <span class="badge">prod</span>
+          </li>
+          <li class="project-item">
+            <span class="status-dot status-warning" aria-label="Warning"></span>
+            <a href="/projects/acme-api">acme-api</a>
+            <span class="badge badge-warning">staging</span>
+          </li>
+          <li class="project-item">
+            <span class="status-dot status-healthy" aria-label="Healthy"></span>
+            <a href="/projects/acme-worker">acme-worker</a>
+            <span class="badge">prod</span>
+          </li>
+          <li class="project-item">
+            <span class="status-dot status-error" aria-label="Error"></span>
+            <a href="/projects/acme-ml">acme-ml</a>
+            <span class="badge badge-danger">failing</span>
+          </li>
+        </ul>
+      </div>
+      <div class="sidebar-section">
+        <h2 class="sidebar-heading">Quick Links</h2>
+        <ul class="quick-links">
+          <li><a href="/docs">Documentation</a></li>
+          <li><a href="/changelog">Changelog</a></li>
+          <li><a href="https://status.acme.dev" target="_blank" rel="noopener noreferrer">Status Page</a></li>
+        </ul>
+      </div>
+    </aside>
+
+    <!-- Dashboard Grid -->
+    <div class="dashboard-content">
+      <header class="page-header">
+        <h1>acme-web Dashboard</h1>
+        <div class="header-actions">
+          <select id="time-range" aria-label="Time range">
+            <option value="1h">Last 1 hour</option>
+            <option value="6h">Last 6 hours</option>
+            <option value="24h" selected>Last 24 hours</option>
+            <option value="7d">Last 7 days</option>
+            <option value="30d">Last 30 days</option>
+          </select>
+          <button class="btn btn-primary" data-action="deploy">
+            <svg width="16" height="16" aria-hidden="true"><use href="#icon-rocket" /></svg>
+            Deploy
+          </button>
+        </div>
+      </header>
+
+      <!-- Metrics Cards -->
+      <section class="metrics-grid" aria-label="Key metrics">
+        <article class="metric-card">
+          <h3 class="metric-label">Requests / sec</h3>
+          <p class="metric-value" data-metric="rps">12,847</p>
+          <p class="metric-change positive">+14.2% from yesterday</p>
+        </article>
+        <article class="metric-card">
+          <h3 class="metric-label">P99 Latency</h3>
+          <p class="metric-value" data-metric="latency">47ms</p>
+          <p class="metric-change positive">-8.1% from yesterday</p>
+        </article>
+        <article class="metric-card">
+          <h3 class="metric-label">Error Rate</h3>
+          <p class="metric-value" data-metric="error-rate">0.12%</p>
+          <p class="metric-change negative">+0.04% from yesterday</p>
+        </article>
+        <article class="metric-card">
+          <h3 class="metric-label">Uptime (30d)</h3>
+          <p class="metric-value" data-metric="uptime">99.97%</p>
+          <p class="metric-change neutral">same as last period</p>
+        </article>
+      </section>
+
+      <!-- Alert Banner -->
+      <div class="alert alert-warning" role="alert" aria-live="polite">
+        <svg width="20" height="20" aria-hidden="true"><use href="#icon-warning" /></svg>
+        <div class="alert-content">
+          <strong>Elevated error rate detected</strong> on <code>/api/v2/orders</code> endpoint.
+          <a href="/incidents/INC-2847">View incident INC-2847</a>
+        </div>
+        <button class="alert-dismiss" aria-label="Dismiss alert">&times;</button>
+      </div>
+
+      <!-- Deployment History Table -->
+      <section class="card" aria-label="Recent deployments">
+        <div class="card-header">
+          <h2>Recent Deployments</h2>
+          <a href="/deployments" class="btn btn-text">View all</a>
+        </div>
+        <table class="data-table" aria-label="Deployment history">
+          <thead>
+            <tr>
+              <th scope="col">Status</th>
+              <th scope="col">Version</th>
+              <th scope="col">Commit</th>
+              <th scope="col">Author</th>
+              <th scope="col">Environment</th>
+              <th scope="col">Duration</th>
+              <th scope="col">Deployed</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-deployment-id="dep_abc123">
+              <td><span class="status-badge status-success">Success</span></td>
+              <td><code>v2.8.0</code></td>
+              <td><a href="https://github.com/acme/web/commit/a1b2c3d"><code>a1b2c3d</code></a></td>
+              <td>Alice Chen</td>
+              <td>production</td>
+              <td>3m 42s</td>
+              <td><time datetime="2024-12-15T08:00:00Z">15 min ago</time></td>
+              <td><button class="btn btn-sm btn-outline" data-action="rollback">Rollback</button></td>
+            </tr>
+            <tr data-deployment-id="dep_def456">
+              <td><span class="status-badge status-success">Success</span></td>
+              <td><code>v2.7.9</code></td>
+              <td><a href="https://github.com/acme/web/commit/d4e5f6g"><code>d4e5f6g</code></a></td>
+              <td>Bob Patel</td>
+              <td>production</td>
+              <td>4m 11s</td>
+              <td><time datetime="2024-12-14T22:30:00Z">10 hours ago</time></td>
+              <td><button class="btn btn-sm btn-outline" data-action="rollback">Rollback</button></td>
+            </tr>
+            <tr data-deployment-id="dep_ghi789" class="row-warning">
+              <td><span class="status-badge status-failed">Failed</span></td>
+              <td><code>v2.8.0-rc.1</code></td>
+              <td><a href="https://github.com/acme/web/commit/g7h8i9j"><code>g7h8i9j</code></a></td>
+              <td>Carol Wu</td>
+              <td>staging</td>
+              <td>1m 03s</td>
+              <td><time datetime="2024-12-14T19:15:00Z">13 hours ago</time></td>
+              <td><button class="btn btn-sm btn-outline" data-action="retry">Retry</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="site-footer" role="contentinfo">
+    <div class="footer-content">
+      <p>&copy; 2024 ACME Inc. All rights reserved.</p>
+      <nav aria-label="Footer navigation">
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/security">Security</a>
+        <a href="https://github.com/acme" target="_blank" rel="noopener noreferrer">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <!-- Modal (hidden) -->
+  <dialog id="deploy-modal" class="modal" aria-labelledby="deploy-modal-title">
+    <form method="dialog" class="modal-content">
+      <header class="modal-header">
+        <h2 id="deploy-modal-title">Confirm Deployment</h2>
+        <button class="modal-close" aria-label="Close" formmethod="dialog">&times;</button>
+      </header>
+      <div class="modal-body">
+        <p>You are about to deploy <strong>v2.8.1</strong> to <strong>production</strong>.</p>
+        <label for="deploy-note">Deployment note (optional)</label>
+        <textarea id="deploy-note" rows="3" placeholder="What changed in this release?"></textarea>
+        <fieldset>
+          <legend>Pre-deploy checks</legend>
+          <label><input type="checkbox" name="checks" value="tests" checked disabled /> All tests passing</label>
+          <label><input type="checkbox" name="checks" value="review" checked disabled /> Code review approved</label>
+          <label><input type="checkbox" name="checks" value="staging" /> Verified on staging</label>
+          <label><input type="checkbox" name="checks" value="rollback" /> Rollback plan reviewed</label>
+        </fieldset>
+      </div>
+      <footer class="modal-footer">
+        <button type="button" class="btn btn-outline" formmethod="dialog">Cancel</button>
+        <button type="submit" class="btn btn-primary btn-danger">Deploy to Production</button>
+      </footer>
+    </form>
+  </dialog>
 </body>
 </html>

@@ -77,7 +77,7 @@ impl ArchiveEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -95,6 +95,10 @@ impl ArchiveEngine {
             .map(|(idx, entry)| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
 
@@ -102,6 +106,8 @@ impl ArchiveEngine {
                 let row_num = format!("{:>4} ", row + 1);
                 let row_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -111,6 +117,8 @@ impl ArchiveEngine {
                 let icon = if entry.is_dir { "📁 " } else { "  " };
                 let icon_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::Cyan)
                 };
@@ -120,6 +128,8 @@ impl ArchiveEngine {
                 let size_str = format_size(entry.size);
                 let size_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else {
                     Style::default().fg(Color::Magenta)
                 };
@@ -141,6 +151,8 @@ impl ArchiveEngine {
                     };
                     let ratio_style = if selected {
                         Style::default().fg(Color::Black).bg(Color::LightBlue)
+                    } else if in_visual {
+                        Style::default().fg(Color::Black).bg(Color::LightYellow)
                     } else {
                         Style::default().fg(ratio_color)
                     };
@@ -152,6 +164,8 @@ impl ArchiveEngine {
                 // Path
                 let path_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue)
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow)
                 } else if entry.is_dir {
                     Style::default().fg(Color::Cyan).bold()
                 } else {
@@ -164,12 +178,13 @@ impl ArchiveEngine {
                         _ => Style::default().fg(Color::White)
                     }
                 };
-                spans.push(Span::styled(&entry.path, path_style));
+                spans.push(Span::styled(entry.path.clone(), path_style));
 
                 Line::from(spans)
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }

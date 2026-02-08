@@ -1,4 +1,25 @@
-id	name	score
-1	Ada	98
-2	Linus	95
-3	Ken	93
+server_id	hostname	region	az	instance_type	vcpu	memory_gb	disk_gb	disk_type	os	kernel	uptime_days	cpu_avg_pct	mem_used_pct	disk_used_pct	net_in_mbps	net_out_mbps	iops_read	iops_write	load_1m	load_5m	load_15m	status	role	last_deploy
+srv-001	api-prod-01	us-east-1	us-east-1a	m6g.2xlarge	8	32	500	gp3	Ubuntu 22.04	6.5.0-44	142	67.3	78.2	45.1	847.2	1203.5	12400	8900	5.2	4.8	4.1	running	api-primary	2024-12-10T14:30:00Z
+srv-002	api-prod-02	us-east-1	us-east-1b	m6g.2xlarge	8	32	500	gp3	Ubuntu 22.04	6.5.0-44	142	52.1	71.8	43.7	623.4	987.2	11200	7800	3.9	3.6	3.2	running	api-primary	2024-12-10T14:32:00Z
+srv-003	api-prod-03	us-east-1	us-east-1c	m6g.2xlarge	8	32	500	gp3	Ubuntu 22.04	6.5.0-44	89	71.8	82.4	47.3	912.1	1342.8	13100	9200	5.8	5.3	4.7	running	api-primary	2024-12-10T14:34:00Z
+srv-004	api-prod-04	us-west-2	us-west-2a	m6g.2xlarge	8	32	500	gp3	Ubuntu 22.04	6.5.0-44	89	48.9	65.3	41.2	534.7	812.3	9800	6700	3.5	3.1	2.8	running	api-secondary	2024-12-10T15:00:00Z
+srv-005	api-prod-05	us-west-2	us-west-2b	m6g.2xlarge	8	32	500	gp3	Ubuntu 22.04	6.5.0-44	89	45.2	63.1	40.8	498.3	756.9	9400	6300	3.2	2.9	2.6	running	api-secondary	2024-12-10T15:02:00Z
+srv-010	pg-primary	us-east-1	us-east-1a	r6g.4xlarge	16	128	2000	io2	Ubuntu 22.04	6.5.0-44	312	34.7	89.1	62.4	234.5	187.3	45000	32000	4.1	3.8	3.5	running	db-primary	2024-11-15T03:00:00Z
+srv-011	pg-replica-01	us-east-1	us-east-1b	r6g.2xlarge	8	64	2000	io2	Ubuntu 22.04	6.5.0-44	312	28.3	72.6	61.8	187.2	45.6	38000	1200	2.1	1.9	1.7	running	db-replica	2024-11-15T03:00:00Z
+srv-012	pg-replica-02	us-west-2	us-west-2a	r6g.2xlarge	8	64	2000	io2	Ubuntu 22.04	6.5.0-44	312	31.2	74.8	62.1	198.4	52.3	39500	1400	2.3	2.1	1.9	running	db-replica	2024-11-15T03:00:00Z
+srv-020	redis-master	us-east-1	us-east-1a	r6g.xlarge	4	32	100	gp3	Ubuntu 22.04	6.5.0-44	267	12.4	87.3	23.1	456.7	423.1	0	0	0.4	0.3	0.3	running	cache-primary	2024-10-20T02:00:00Z
+srv-021	redis-replica-01	us-east-1	us-east-1b	r6g.xlarge	4	32	100	gp3	Ubuntu 22.04	6.5.0-44	267	8.7	84.1	22.8	412.3	34.5	0	0	0.3	0.2	0.2	running	cache-replica	2024-10-20T02:00:00Z
+srv-030	kafka-0	us-east-1	us-east-1a	m6g.xlarge	4	16	1000	gp3	Ubuntu 22.04	6.5.0-44	198	42.3	71.2	78.4	312.4	298.7	8900	7200	1.8	1.6	1.5	running	queue-broker	2024-11-01T04:00:00Z
+srv-031	kafka-1	us-east-1	us-east-1b	m6g.xlarge	4	16	1000	gp3	Ubuntu 22.04	6.5.0-44	198	39.8	68.9	76.2	298.1	287.3	8500	6900	1.6	1.5	1.4	running	queue-broker	2024-11-01T04:00:00Z
+srv-032	kafka-2	us-east-1	us-east-1c	m6g.xlarge	4	16	1000	gp3	Ubuntu 22.04	6.5.0-44	198	41.1	70.4	77.8	305.2	291.4	8700	7100	1.7	1.6	1.5	running	queue-broker	2024-11-01T04:00:00Z
+srv-040	worker-01	us-east-1	us-east-1a	c6g.2xlarge	8	16	200	gp3	Ubuntu 22.04	6.5.0-44	45	89.2	54.3	31.2	12.4	8.7	3200	2100	7.2	6.8	6.1	running	job-worker	2024-12-01T10:00:00Z
+srv-041	worker-02	us-east-1	us-east-1b	c6g.2xlarge	8	16	200	gp3	Ubuntu 22.04	6.5.0-44	45	91.7	58.1	32.8	14.2	9.3	3400	2300	7.5	7.1	6.4	running	job-worker	2024-12-01T10:00:00Z
+srv-042	worker-03	us-east-1	us-east-1c	c6g.2xlarge	8	16	200	gp3	Ubuntu 22.04	6.5.0-44	45	87.4	52.7	30.4	11.8	7.9	3100	2000	6.9	6.5	5.8	running	job-worker	2024-12-01T10:00:00Z
+srv-050	monitor-01	us-east-1	us-east-1a	m6g.xlarge	4	16	500	gp3	Ubuntu 22.04	6.5.0-44	365	23.4	67.8	82.3	45.6	312.4	5600	4200	0.9	0.8	0.7	running	monitoring	2023-12-15T08:00:00Z
+srv-051	grafana-01	us-east-1	us-east-1a	t3.large	2	8	100	gp3	Ubuntu 22.04	6.5.0-44	365	15.2	45.3	38.7	23.4	156.7	1200	800	0.3	0.2	0.2	running	monitoring	2023-12-15T08:00:00Z
+srv-060	bastion-01	us-east-1	us-east-1a	t3.small	2	2	20	gp3	Ubuntu 22.04	6.5.0-44	412	2.1	34.2	12.4	0.8	0.3	100	50	0.0	0.0	0.0	running	bastion	2023-11-01T00:00:00Z
+srv-070	ci-runner-01	us-east-1	us-east-1a	c6g.4xlarge	16	32	500	gp3	Ubuntu 22.04	6.5.0-44	30	78.4	62.1	67.3	234.5	187.2	15000	12000	12.3	10.8	9.4	running	ci-runner	2024-11-15T12:00:00Z
+srv-071	ci-runner-02	us-east-1	us-east-1b	c6g.4xlarge	16	32	500	gp3	Ubuntu 22.04	6.5.0-44	30	82.1	65.4	69.1	245.7	198.3	15800	12600	13.1	11.4	9.9	running	ci-runner	2024-11-15T12:00:00Z
+srv-080	staging-api	us-east-1	us-east-1a	m6g.large	2	8	100	gp3	Ubuntu 22.04	6.5.0-44	67	18.3	42.1	28.4	34.5	67.2	2100	1400	0.3	0.2	0.2	running	api-staging	2024-12-10T16:00:00Z
+srv-090	canary-01	us-east-1	us-east-1a	m6g.xlarge	4	16	200	gp3	Ubuntu 22.04	6.5.0-44	3	45.6	58.3	22.1	178.9	234.5	5600	3800	1.8	1.5	1.2	running	api-canary	2024-12-12T09:00:00Z
+srv-099	decom-web-01	us-east-1	us-east-1c	m5.large	2	8	100	gp2	Ubuntu 20.04	5.15.0-91	823	0.4	12.3	89.7	0.0	0.0	10	5	0.0	0.0	0.0	stopped	decommission	2023-04-01T00:00:00Z

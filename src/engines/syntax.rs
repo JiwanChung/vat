@@ -104,7 +104,7 @@ impl SyntaxEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         self.last_view_height = area.height as usize;
         let chunks = if self.show_sidebar {
             Layout::default()
@@ -120,9 +120,9 @@ impl SyntaxEngine {
 
         if self.show_sidebar {
             self.render_sidebar(frame, chunks[0]);
-            self.render_code(frame, chunks[1]);
+            self.render_code(frame, chunks[1], wrap);
         } else {
-            self.render_code(frame, chunks[0]);
+            self.render_code(frame, chunks[0], wrap);
         }
     }
 
@@ -344,7 +344,7 @@ impl SyntaxEngine {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
-    fn render_code(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_code(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + area.height as usize {
@@ -352,7 +352,7 @@ impl SyntaxEngine {
         }
 
         if self.is_markdown {
-            self.render_markdown(frame, area);
+            self.render_markdown(frame, area, wrap);
             return;
         }
 
@@ -424,11 +424,12 @@ impl SyntaxEngine {
             output.push(line_widget);
         }
 
+        let output = if wrap { super::wrap_lines(output, area.width as usize) } else { output };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(output).block(block), area);
     }
 
-    fn render_markdown(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_markdown(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         if self.selection >= self.md_rendered.len() {
             self.selection = self.md_rendered.len().saturating_sub(1);
         }
@@ -442,16 +443,16 @@ impl SyntaxEngine {
         let mut output = render_markdown_with_gutter(&self.md_rendered, Some((self.selection, self.scroll)));
         output.truncate(height);
 
+        let output = if wrap { super::wrap_lines(output, area.width as usize) } else { output };
         let block = Block::default().borders(Borders::NONE);
-        let paragraph = Paragraph::new(output).block(block).wrap(ratatui::widgets::Wrap { trim: false });
-        frame.render_widget(paragraph, area);
+        frame.render_widget(Paragraph::new(output).block(block), area);
     }
 }
 
 fn syntect_span(style: SynStyle, text: &str) -> Span<'static> {
     let fg = style.foreground;
     Span::styled(
-        text.to_string(),
+        text.trim_end_matches('\n').to_string(),
         Style::default().fg(Color::Rgb(fg.r, fg.g, fg.b)),
     )
 }

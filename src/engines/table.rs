@@ -7,7 +7,7 @@ use polars::prelude::*;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Cell, Row, Table, TableState};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState};
 
 /// TableEngine for CSV/TSV/Parquet files.
 /// Uses Polars DataFrame for efficient columnar storage.
@@ -18,10 +18,15 @@ pub struct TableEngine {
     selection: usize,
     scroll: usize,
     schema_view: bool,
+    detail_view: bool,
+    detail_scroll: usize,
+    col_offset: usize,
+    col_widths: Vec<usize>,
     file_name: String,
     last_query: Option<String>,
     pending_g: bool,
     last_view_height: usize,
+    last_view_width: usize,
     last_match: Option<String>,
     /// Visual selection range (start, end) for highlighting
     pub visual_range: Option<(usize, usize)>,
@@ -55,11 +60,17 @@ impl TableEngine {
             _ => return Err(anyhow!("Unsupported tabular format: {}", ext)),
         };
 
+        let col_widths = compute_col_widths(&df, 30);
+
         Ok(Self {
             df,
             selection: 0,
             scroll: 0,
             schema_view: false,
+            detail_view: false,
+            detail_scroll: 0,
+            col_offset: 0,
+            col_widths,
             file_name: path
                 .file_name()
                 .and_then(|s| s.to_str())
@@ -68,15 +79,19 @@ impl TableEngine {
             last_query: None,
             pending_g: false,
             last_view_height: 0,
+            last_view_width: 0,
             last_match: None,
             visual_range: None,
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, _wrap: bool) {
         self.last_view_height = area.height as usize;
+        self.last_view_width = area.width as usize;
         if self.schema_view {
             self.render_schema(frame, area);
+        } else if self.detail_view {
+            self.render_detail(frame, area);
         } else {
             self.render_table(frame, area);
         }
@@ -149,6 +164,62 @@ impl TableEngine {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Handle detail view keys separately — j/k scroll the field list
+        if self.detail_view {
+            match key.code {
+                KeyCode::Char('g') => {
+                    if self.pending_g {
+                        self.detail_scroll = 0;
+                        self.pending_g = false;
+                    } else {
+                        self.pending_g = true;
+                    }
+                    return;
+                }
+                _ => {
+                    self.pending_g = false;
+                }
+            }
+            match key.code {
+                KeyCode::Char('j') | KeyCode::Down => {
+                    let max = self.df.width(); // +1 for header line, but 0-based
+                    self.detail_scroll = (self.detail_scroll + 1).min(max);
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    self.detail_scroll = self.detail_scroll.saturating_sub(1);
+                }
+                KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let jump = page_jump(self.last_view_height);
+                    self.detail_scroll = self.detail_scroll.saturating_sub(jump);
+                }
+                KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    let jump = page_jump(self.last_view_height);
+                    let max = self.df.width();
+                    self.detail_scroll = (self.detail_scroll + jump).min(max);
+                }
+                KeyCode::Char('G') => {
+                    self.detail_scroll = self.df.width();
+                }
+                KeyCode::Char('n') => {
+                    self.cycle_detail_row(true);
+                }
+                KeyCode::Char('N') => {
+                    self.cycle_detail_row(false);
+                }
+                KeyCode::Enter | KeyCode::Esc => {
+                    self.detail_view = false;
+                    self.detail_scroll = 0;
+                }
+                KeyCode::Char('s') => {
+                    self.detail_view = false;
+                    self.detail_scroll = 0;
+                    self.schema_view = true;
+                }
+                _ => {}
+            }
+            return;
+        }
+
         match key.code {
             KeyCode::Char('g') => {
                 if self.pending_g {
@@ -171,6 +242,33 @@ impl TableEngine {
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.selection = self.selection.saturating_sub(1);
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                if !self.schema_view {
+                    self.col_offset = self.col_offset.saturating_sub(1);
+                }
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if !self.schema_view && self.df.width() > 0 {
+                    self.col_offset = (self.col_offset + 1).min(self.df.width() - 1);
+                }
+            }
+            KeyCode::Char('H') => {
+                if !self.schema_view {
+                    self.col_offset = 0;
+                }
+            }
+            KeyCode::Char('L') => {
+                if !self.schema_view && self.df.width() > 0 {
+                    // Set col_offset so the last column is the rightmost visible one
+                    self.col_offset = self.compute_last_col_offset();
+                }
+            }
+            KeyCode::Enter => {
+                if !self.schema_view {
+                    self.detail_view = true;
+                    self.detail_scroll = 0;
+                }
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 let jump = page_jump(self.last_view_height).min(self.selection);
@@ -218,20 +316,44 @@ impl TableEngine {
     }
 
     pub fn breadcrumbs(&self) -> String {
-        format!("{} row {}/{}", self.file_name, self.selection + 1, self.df.height())
+        if self.schema_view {
+            format!("{} schema {}/{}", self.file_name, self.selection + 1, self.df.schema().len())
+        } else if self.detail_view {
+            format!("{} row {}/{} (detail)", self.file_name, self.selection + 1, self.df.height())
+        } else {
+            format!(
+                "{} row {}/{} col {}/{}",
+                self.file_name,
+                self.selection + 1,
+                self.df.height(),
+                self.col_offset + 1,
+                self.df.width()
+            )
+        }
     }
 
     pub fn status_line(&self) -> String {
-        let view = if self.schema_view { "schema" } else { "data" };
         let query = self
             .last_query
             .as_ref()
             .map(|q| format!(" | search: {}", q))
             .unwrap_or_default();
-        format!(
-            "j/k move | gg/G jump | Ctrl+u/d half-page | n/N next/prev | s toggle schema | / search | f filter{} | view: {}",
-            query, view
-        )
+        if self.detail_view {
+            format!(
+                "j/k scroll | n/N next/prev row | Enter/Esc back | gg/G jump | Ctrl+u/d half-page | s schema{}",
+                query
+            )
+        } else if self.schema_view {
+            format!(
+                "j/k move | gg/G jump | s toggle schema | / search | f filter{}",
+                query
+            )
+        } else {
+            format!(
+                "j/k move | h/l cols | H/L first/last col | Enter detail | gg/G jump | Ctrl+u/d half-page | n/N next/prev | s schema | / search | f filter{}",
+                query
+            )
+        }
     }
 
     pub fn apply_filter(&mut self, query: &str) {
@@ -305,6 +427,48 @@ impl TableEngine {
         self.selection
     }
 
+    /// Compute col_offset so the last column is the rightmost visible column.
+    /// Walks backwards from the last column, accumulating widths until they exceed
+    /// the available space, then returns the offset of the first column that fits.
+    fn compute_last_col_offset(&self) -> usize {
+        let row_num_width: usize = 6;
+        let separator_width: usize = 2;
+        let frozen_width = row_num_width + separator_width;
+        let available = self.last_view_width.saturating_sub(frozen_width);
+
+        let total_cols = self.df.width();
+        if total_cols == 0 {
+            return 0;
+        }
+        let mut used: usize = 0;
+        let mut first_visible = total_cols - 1;
+        for i in (0..total_cols).rev() {
+            let w = self.col_widths.get(i).copied().unwrap_or(8);
+            let needed = if i == total_cols - 1 { w } else { w + 1 };
+            if used + needed > available && i < total_cols - 1 {
+                break;
+            }
+            used += needed;
+            first_visible = i;
+        }
+        first_visible
+    }
+
+    /// Cycle to the next/previous row while in detail view.
+    fn cycle_detail_row(&mut self, forward: bool) {
+        if forward {
+            if self.selection + 1 < self.df.height() {
+                self.selection += 1;
+                self.detail_scroll = 0;
+            }
+        } else {
+            if self.selection > 0 {
+                self.selection -= 1;
+                self.detail_scroll = 0;
+            }
+        }
+    }
+
     fn render_table(&mut self, frame: &mut ratatui::Frame, area: Rect) {
         if self.df.width() == 0 {
             frame.render_widget(Block::default().borders(Borders::ALL).title("Empty"), area);
@@ -323,6 +487,32 @@ impl TableEngine {
             .df
             .slice(self.scroll as i64, height.min(self.df.height()));
 
+        // Determine which columns are visible based on col_offset and available width
+        let row_num_width: usize = 6;
+        let separator_width: usize = 2;
+        let frozen_width = row_num_width + separator_width;
+        let available = (area.width as usize).saturating_sub(frozen_width);
+
+        let total_cols = self.df.width();
+        let mut visible_count = 0;
+        let mut used_width = 0;
+        for i in self.col_offset..total_cols {
+            let w = self.col_widths.get(i).copied().unwrap_or(8);
+            // +1 for cell padding between columns
+            let needed = if visible_count == 0 { w } else { w + 1 };
+            if visible_count > 0 && used_width + needed > available {
+                break;
+            }
+            used_width += needed;
+            visible_count += 1;
+        }
+        if visible_count == 0 && total_cols > 0 {
+            visible_count = 1;
+        }
+
+        let col_end = (self.col_offset + visible_count).min(total_cols);
+        let col_names = self.df.get_column_names();
+
         let header_style = Style::default()
             .fg(Color::Black)
             .bg(Color::LightBlue)
@@ -330,12 +520,9 @@ impl TableEngine {
         let mut headers: Vec<Cell> = Vec::new();
         headers.push(Cell::from("#").style(header_style));
         headers.push(Cell::from("│").style(Style::default().fg(Color::LightBlue)));
-        headers.extend(
-            slice
-                .get_column_names()
-                .iter()
-                .map(|name| Cell::from(*name).style(header_style)),
-        );
+        for i in self.col_offset..col_end {
+            headers.push(Cell::from(col_names[i]).style(header_style));
+        }
         let header = Row::new(headers).style(
             Style::default()
                 .fg(Color::Black)
@@ -343,44 +530,47 @@ impl TableEngine {
                 .bold(),
         );
 
+        let columns = self.df.get_columns();
         let mut rows = Vec::new();
         for row_idx in 0..slice.height() {
+            let abs_row = self.scroll + row_idx;
+            let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                abs_row >= lo && abs_row <= hi
+            });
             let mut cells = Vec::new();
             cells.push(
-                Cell::from((self.scroll + row_idx + 1).to_string())
+                Cell::from((abs_row + 1).to_string())
                     .style(Style::default().fg(Color::DarkGray)),
             );
             cells.push(Cell::from("│").style(Style::default().fg(Color::DarkGray)));
-            for series in slice.get_columns() {
-                let value = series.get(row_idx).map(|v| v.to_string()).unwrap_or_default();
-                // Color based on data type
-                let style = match series.dtype() {
-                    polars::datatypes::DataType::Int8
-                    | polars::datatypes::DataType::Int16
-                    | polars::datatypes::DataType::Int32
-                    | polars::datatypes::DataType::Int64
-                    | polars::datatypes::DataType::UInt8
-                    | polars::datatypes::DataType::UInt16
-                    | polars::datatypes::DataType::UInt32
-                    | polars::datatypes::DataType::UInt64
-                    | polars::datatypes::DataType::Float32
-                    | polars::datatypes::DataType::Float64 => Style::default().fg(Color::Magenta),
-                    polars::datatypes::DataType::Boolean => Style::default().fg(Color::Cyan),
-                    polars::datatypes::DataType::String => Style::default().fg(Color::Yellow),
-                    polars::datatypes::DataType::Date
-                    | polars::datatypes::DataType::Datetime(_, _)
-                    | polars::datatypes::DataType::Time => Style::default().fg(Color::Green),
-                    polars::datatypes::DataType::Null => Style::default().fg(Color::DarkGray),
-                    _ => Style::default().fg(Color::White),
-                };
+            for col_i in self.col_offset..col_end {
+                let series = &columns[col_i];
+                let value = series.get(self.scroll + row_idx).map(|v| v.to_string()).unwrap_or_default();
+                let style = dtype_style(series.dtype());
                 cells.push(Cell::from(value).style(style));
             }
-            rows.push(Row::new(cells));
+            let mut table_row = Row::new(cells);
+            if in_visual {
+                table_row = table_row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
+            }
+            rows.push(table_row);
         }
 
         let row_count = rows.len();
-        let mut widths = vec![Constraint::Length(6), Constraint::Length(2)];
-        widths.extend(make_widths(slice.width()));
+        let mut widths: Vec<Constraint> = vec![
+            Constraint::Length(row_num_width as u16),
+            Constraint::Length(separator_width as u16),
+        ];
+        for (idx, i) in (self.col_offset..col_end).enumerate() {
+            let w = self.col_widths.get(i).copied().unwrap_or(8) as u16;
+            if idx == visible_count - 1 {
+                // Last visible column fills remaining space
+                widths.push(Constraint::Min(w));
+            } else {
+                widths.push(Constraint::Length(w));
+            }
+        }
         let table = Table::new(rows, widths)
             .header(header)
             .block(Block::default().borders(Borders::NONE))
@@ -394,13 +584,58 @@ impl TableEngine {
         frame.render_stateful_widget(table, area, &mut state);
     }
 
+    fn render_detail(&self, frame: &mut ratatui::Frame, area: Rect) {
+        let row_idx = self.selection;
+        let col_names = self.df.get_column_names();
+        let columns = self.df.get_columns();
+
+        // Find the max column name length for alignment
+        let max_name_len = col_names.iter().map(|n| n.len()).max().unwrap_or(0);
+
+        let mut lines = Vec::new();
+
+        // Header line
+        let header_text = format!("── Row {} ──", row_idx + 1);
+        lines.push(Line::from(Span::styled(
+            header_text,
+            Style::default().fg(Color::LightBlue).bold(),
+        )));
+
+        if row_idx < self.df.height() {
+            for (i, name) in col_names.iter().enumerate() {
+                let value = columns[i]
+                    .get(row_idx)
+                    .map(|v| v.to_string())
+                    .unwrap_or_default();
+                let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
+                let style = dtype_style(columns[i].dtype());
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        name.to_string(),
+                        Style::default().fg(Color::Cyan).bold(),
+                    ),
+                    Span::raw(format!("{}  ", padding)),
+                    Span::styled(value, style),
+                ]));
+            }
+        }
+
+        let block = Block::default().borders(Borders::NONE);
+        frame.render_widget(
+            Paragraph::new(lines)
+                .block(block)
+                .scroll((self.detail_scroll as u16, 0)),
+            area,
+        );
+    }
+
     fn render_schema(&self, frame: &mut ratatui::Frame, area: Rect) {
         let mut lines = Vec::new();
         for field in self.df.schema().iter_fields() {
             lines.push(Line::from(format!("{}: {}", field.name(), field.data_type())));
         }
         let block = Block::default().borders(Borders::NONE);
-        frame.render_widget(ratatui::widgets::Paragraph::new(lines).block(block), area);
+        frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
@@ -439,16 +674,49 @@ impl TableEngine {
     }
 }
 
-fn make_widths(cols: usize) -> Vec<Constraint> {
-    if cols == 0 {
-        return vec![Constraint::Percentage(100)];
+/// Compute content-aware column widths by scanning the first 100 rows.
+fn compute_col_widths(df: &DataFrame, max_width: usize) -> Vec<usize> {
+    let sample_rows = df.height().min(100);
+    df.get_columns()
+        .iter()
+        .map(|col| {
+            let header_len = col.name().len();
+            let mut max_val_len = 0;
+            for i in 0..sample_rows {
+                if let Ok(val) = col.get(i) {
+                    let len = val.to_string().len();
+                    if len > max_val_len {
+                        max_val_len = len;
+                    }
+                }
+            }
+            let w = header_len.max(max_val_len).max(4);
+            w.min(max_width)
+        })
+        .collect()
+}
+
+/// Get a style for a Polars data type.
+fn dtype_style(dtype: &polars::datatypes::DataType) -> Style {
+    match dtype {
+        polars::datatypes::DataType::Int8
+        | polars::datatypes::DataType::Int16
+        | polars::datatypes::DataType::Int32
+        | polars::datatypes::DataType::Int64
+        | polars::datatypes::DataType::UInt8
+        | polars::datatypes::DataType::UInt16
+        | polars::datatypes::DataType::UInt32
+        | polars::datatypes::DataType::UInt64
+        | polars::datatypes::DataType::Float32
+        | polars::datatypes::DataType::Float64 => Style::default().fg(Color::Magenta),
+        polars::datatypes::DataType::Boolean => Style::default().fg(Color::Cyan),
+        polars::datatypes::DataType::String => Style::default().fg(Color::Yellow),
+        polars::datatypes::DataType::Date
+        | polars::datatypes::DataType::Datetime(_, _)
+        | polars::datatypes::DataType::Time => Style::default().fg(Color::Green),
+        polars::datatypes::DataType::Null => Style::default().fg(Color::DarkGray),
+        _ => Style::default().fg(Color::White),
     }
-    let base = 100 / cols as u16;
-    let mut widths = vec![Constraint::Percentage(base); cols];
-    if let Some(last) = widths.last_mut() {
-        *last = Constraint::Percentage(100 - base * (cols as u16 - 1));
-    }
-    widths
 }
 
 fn page_jump(view_height: usize) -> usize {
@@ -475,14 +743,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn widths_cover_full_percentage() {
-        let widths = make_widths(3);
-        let mut total = 0;
-        for width in widths {
-            if let Constraint::Percentage(value) = width {
-                total += value;
-            }
-        }
-        assert_eq!(total, 100);
+    fn compute_col_widths_respects_max() {
+        // Create a simple DataFrame with known content
+        let s1 = Series::new("id".into(), &[1i64, 2, 3]);
+        let s2 = Series::new("a_very_long_column_name_here".into(), &["short", "x", "y"]);
+        let df = DataFrame::new(vec![s1, s2]).unwrap();
+        let widths = compute_col_widths(&df, 30);
+        // "id" column: max(2, 1) = 2, but min is 4
+        assert_eq!(widths[0], 4);
+        // Long column name: 28 chars, values are shorter, so width = 28
+        assert_eq!(widths[1], 28);
+    }
+
+    #[test]
+    fn compute_col_widths_caps_at_max() {
+        let long_val = "a".repeat(50);
+        let s1 = Series::new("x".into(), &[long_val.as_str()]);
+        let df = DataFrame::new(vec![s1]).unwrap();
+        let widths = compute_col_widths(&df, 30);
+        assert_eq!(widths[0], 30);
+    }
+
+    #[test]
+    fn dtype_style_returns_correct_colors() {
+        let s = dtype_style(&polars::datatypes::DataType::Int64);
+        assert_eq!(s, Style::default().fg(Color::Magenta));
+
+        let s = dtype_style(&polars::datatypes::DataType::String);
+        assert_eq!(s, Style::default().fg(Color::Yellow));
+
+        let s = dtype_style(&polars::datatypes::DataType::Boolean);
+        assert_eq!(s, Style::default().fg(Color::Cyan));
     }
 }

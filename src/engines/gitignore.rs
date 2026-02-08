@@ -51,7 +51,7 @@ impl GitIgnoreEngine {
         })
     }
 
-    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+    pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
 
@@ -71,11 +71,17 @@ impl GitIgnoreEngine {
             .map(|(idx, (line_no, _raw, parsed))| {
                 let row = self.scroll + idx;
                 let selected = row == self.selection;
+                let in_visual = self.visual_range.map_or(false, |(start, end)| {
+                    let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
+                    row >= lo && row <= hi
+                });
 
                 let mut spans = Vec::new();
                 let line_no_str = format!("{:>width$} ", line_no, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
+                } else if in_visual {
+                    Style::default().fg(Color::Black).bg(Color::LightYellow).bold()
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
@@ -87,6 +93,8 @@ impl GitIgnoreEngine {
                         if *is_negated {
                             let neg_style = if selected {
                                 Style::default().fg(Color::Black).bg(Color::LightBlue)
+                            } else if in_visual {
+                                Style::default().fg(Color::Black).bg(Color::LightYellow)
                             } else {
                                 Style::default().fg(Color::LightGreen)
                             };
@@ -95,6 +103,8 @@ impl GitIgnoreEngine {
 
                         let pattern_style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else if *is_negated {
                             Style::default().fg(Color::LightGreen)
                         } else {
@@ -105,6 +115,8 @@ impl GitIgnoreEngine {
                         if *is_dir {
                             let dir_style = if selected {
                                 Style::default().fg(Color::Black).bg(Color::LightBlue)
+                            } else if in_visual {
+                                Style::default().fg(Color::Black).bg(Color::LightYellow)
                             } else {
                                 Style::default().fg(Color::DarkGray)
                             };
@@ -116,6 +128,8 @@ impl GitIgnoreEngine {
                         if !hint.is_empty() {
                             let hint_style = if selected {
                                 Style::default().fg(Color::Black).bg(Color::LightBlue)
+                            } else if in_visual {
+                                Style::default().fg(Color::Black).bg(Color::LightYellow)
                             } else {
                                 Style::default().fg(Color::Cyan)
                             };
@@ -125,6 +139,8 @@ impl GitIgnoreEngine {
                     GitIgnoreLine::Comment(text) => {
                         let style = if selected {
                             Style::default().fg(Color::Black).bg(Color::LightBlue)
+                        } else if in_visual {
+                            Style::default().fg(Color::Black).bg(Color::LightYellow)
                         } else {
                             Style::default().fg(Color::DarkGray)
                         };
@@ -137,6 +153,7 @@ impl GitIgnoreEngine {
             })
             .collect();
 
+        let visible = if wrap { super::wrap_lines(visible, area.width as usize) } else { visible };
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(visible).block(block), area);
     }
@@ -270,12 +287,21 @@ impl GitIgnoreEngine {
                 spans.push(Span::styled("│ ", Style::default().fg(Color::DarkGray)));
 
                 match parsed {
-                    GitIgnoreLine::Pattern { pattern, is_negated, .. } => {
+                    GitIgnoreLine::Pattern { pattern, is_negated, is_dir } => {
                         if *is_negated {
                             spans.push(Span::styled("! ", Style::default().fg(Color::LightGreen)));
                         }
                         let color = if *is_negated { Color::LightGreen } else { Color::LightRed };
                         spans.push(Span::styled(pattern.clone(), Style::default().fg(color)));
+
+                        if *is_dir {
+                            spans.push(Span::styled(" (dir)", Style::default().fg(Color::DarkGray)));
+                        }
+
+                        let hint = categorize_pattern(pattern);
+                        if !hint.is_empty() {
+                            spans.push(Span::styled(format!("  # {}", hint), Style::default().fg(Color::DarkGray)));
+                        }
                     }
                     GitIgnoreLine::Comment(text) => {
                         spans.push(Span::styled(text.clone(), Style::default().fg(Color::DarkGray)));
