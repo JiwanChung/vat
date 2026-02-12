@@ -657,6 +657,7 @@ fn render_markdown(content: &str) -> Vec<MdLine> {
     let arena = Arena::new();
     let mut options = ComrakOptions::default();
     options.extension.tasklist = true;
+    options.extension.table = true;
     let root = parse_document(&arena, content, &options);
     let mut renderer = MdRenderer::new();
     for node in root.children() {
@@ -781,6 +782,107 @@ impl MdRenderer {
                 self.blank_line();
                 for child in node.children() {
                     self.render_block(child, indent, true);
+                }
+                self.blank_line();
+            }
+            NodeValue::Table(table_meta) => {
+                self.blank_line();
+                let alignments = table_meta.alignments.clone();
+                // Collect all rows: each row is a Vec of cell text
+                let mut rows: Vec<(Vec<String>, bool)> = Vec::new(); // (cells, is_header)
+                for row_node in node.children() {
+                    let is_header = matches!(
+                        &row_node.data.borrow().value,
+                        NodeValue::TableRow(true)
+                    );
+                    let mut cells = Vec::new();
+                    for cell_node in row_node.children() {
+                        let text: String = self
+                            .render_inlines(cell_node, Style::default())
+                            .iter()
+                            .map(|s| s.content.to_string())
+                            .collect();
+                        cells.push(text);
+                    }
+                    rows.push((cells, is_header));
+                }
+                // Compute column widths
+                let num_cols = alignments.len().max(
+                    rows.iter().map(|(cells, _)| cells.len()).max().unwrap_or(0),
+                );
+                let mut col_widths = vec![0usize; num_cols];
+                for (cells, _) in &rows {
+                    for (i, cell) in cells.iter().enumerate() {
+                        if i < num_cols {
+                            col_widths[i] = col_widths[i].max(cell.len());
+                        }
+                    }
+                }
+                // Render each row
+                for (cells, is_header) in &rows {
+                    let mut spans = Vec::new();
+                    if in_quote {
+                        spans.push(Span::styled("> ", Style::default().fg(Color::LightCyan)));
+                    }
+                    if indent > 0 {
+                        spans.push(Span::raw(" ".repeat(indent)));
+                    }
+                    for (i, cell) in cells.iter().enumerate() {
+                        if i > 0 {
+                            spans.push(Span::styled(
+                                " │ ",
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        }
+                        let w = col_widths.get(i).copied().unwrap_or(0);
+                        use comrak::nodes::TableAlignment;
+                        let aligned = match alignments.get(i) {
+                            Some(TableAlignment::Right) => format!("{:>width$}", cell, width = w),
+                            Some(TableAlignment::Center) => {
+                                let pad = w.saturating_sub(cell.len());
+                                let left = pad / 2;
+                                let right = pad - left;
+                                format!("{}{}{}", " ".repeat(left), cell, " ".repeat(right))
+                            }
+                            _ => format!("{:<width$}", cell, width = w),
+                        };
+                        let style = if *is_header {
+                            Style::default().fg(Color::LightCyan).bold()
+                        } else {
+                            Style::default().fg(Color::White)
+                        };
+                        spans.push(Span::styled(aligned, style));
+                    }
+                    self.lines.push(MdLine {
+                        line: Line::from(spans),
+                        source_line: Some(source),
+                    });
+                    // Render separator after header row
+                    if *is_header {
+                        let mut sep_spans = Vec::new();
+                        if in_quote {
+                            sep_spans.push(Span::styled("> ", Style::default().fg(Color::LightCyan)));
+                        }
+                        if indent > 0 {
+                            sep_spans.push(Span::raw(" ".repeat(indent)));
+                        }
+                        for (i, w) in col_widths.iter().enumerate() {
+                            if i > 0 {
+                                sep_spans.push(Span::styled(
+                                    "─┼─",
+                                    Style::default().fg(Color::DarkGray),
+                                ));
+                            }
+                            sep_spans.push(Span::styled(
+                                "─".repeat(*w),
+                                Style::default().fg(Color::DarkGray),
+                            ));
+                        }
+                        self.lines.push(MdLine {
+                            line: Line::from(sep_spans),
+                            source_line: None,
+                        });
+                    }
                 }
                 self.blank_line();
             }
