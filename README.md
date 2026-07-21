@@ -36,7 +36,13 @@ $ curl api.com | vat -   # Pipe anything, auto-detect format
 
 ## Installation
 
-### From GitHub (recommended)
+### From crates.io
+
+```bash
+cargo install vat-viewer   # installs the `vat` command
+```
+
+### From GitHub
 
 ```bash
 cargo install --git https://github.com/JiwanChung/vat

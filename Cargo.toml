@@ -1,5 +1,5 @@
 [package]
-name = "vat"
+name = "vat-viewer"
 version = "0.1.0"
 edition = "2021"
 description = "A semantic file viewer that renders files in the most intuitive terminal view"
