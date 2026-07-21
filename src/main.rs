@@ -79,6 +79,20 @@ fn read_stdin_to_temp(language: &Option<String>) -> Result<(PathBuf, Option<temp
 fn detect_format(content: &[u8]) -> String {
     let text = String::from_utf8_lossy(content);
     let trimmed = text.trim_start();
+    let first_line = trimmed.lines().next().unwrap_or("").trim();
+
+    // TOML: a `[section]` header plus a `key = value`. Checked before JSON so a
+    // file starting with `[package]` is not mistaken for a JSON array.
+    if first_line.starts_with('[')
+        && first_line.ends_with(']')
+        && !first_line.contains(',')
+        && text.lines().any(|l| {
+            let t = l.trim();
+            !t.starts_with('#') && !t.starts_with('[') && t.contains('=')
+        })
+    {
+        return "toml".to_string();
+    }
 
     // JSON detection
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
@@ -96,12 +110,8 @@ fn detect_format(content: &[u8]) -> String {
         return "json".to_string();
     }
 
-    // YAML detection (starts with ---, or key: value pattern)
-    if trimmed.starts_with("---") || (trimmed.contains(':') && !trimmed.contains('{')) {
-        return "yaml".to_string();
-    }
-
-    // CSV detection (comma-separated with consistent column count)
+    // CSV detection (comma-separated with consistent column count). Before YAML
+    // so a CSV whose cells contain colons (e.g. `12:30`) is not taken as YAML.
     let lines: Vec<&str> = text.lines().take(5).collect();
     if lines.len() >= 2 {
         let comma_counts: Vec<usize> = lines.iter().map(|l| l.matches(',').count()).collect();
@@ -110,9 +120,10 @@ fn detect_format(content: &[u8]) -> String {
         }
     }
 
-    // TOML detection
-    if trimmed.starts_with('[') && trimmed.contains(']') && trimmed.contains('=') {
-        return "toml".to_string();
+    // YAML detection: a document marker, or a genuine `key: value` first line
+    // (a bare identifier key followed by `:` and a space/EOL) — not any colon.
+    if trimmed.starts_with("---") || is_yaml_key_line(first_line) {
+        return "yaml".to_string();
     }
 
     // .env detection
@@ -127,6 +138,24 @@ fn detect_format(content: &[u8]) -> String {
     "txt".to_string()
 }
 
+/// Whether a line looks like a YAML mapping entry `key: value` / `key:` where
+/// the key is a simple scalar (identifier-ish, no spaces) and the colon is
+/// followed by a space or end of line. Rejects `12:30`, `http://x`, `a,b:c`.
+fn is_yaml_key_line(line: &str) -> bool {
+    match line.find(':') {
+        Some(colon) => {
+            let key = &line[..colon];
+            let after = &line[colon + 1..];
+            !key.is_empty()
+                && key
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || matches!(c, '_' | '-' | '.'))
+                && (after.is_empty() || after.starts_with(' '))
+        }
+        None => false,
+    }
+}
+
 impl From<Paging> for app::Paging {
     fn from(value: Paging) -> Self {
         match value {
@@ -134,5 +163,44 @@ impl From<Paging> for app::Paging {
             Paging::Always => app::Paging::Always,
             Paging::Never => app::Paging::Never,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::detect_format;
+
+    fn detect(s: &str) -> String {
+        detect_format(s.as_bytes())
+    }
+
+    #[test]
+    fn toml_section_is_not_json() {
+        assert_eq!(detect("[package]\nname = \"vat\"\nversion = \"0.1.0\"\n"), "toml");
+        assert_eq!(detect("[a.b]\nx = 1\n"), "toml");
+    }
+
+    #[test]
+    fn json_array_still_detected() {
+        assert_eq!(detect("[1, 2, 3]\n"), "json");
+        assert_eq!(detect("{\"a\": 1}\n"), "json");
+    }
+
+    #[test]
+    fn csv_with_colons_is_not_yaml() {
+        assert_eq!(detect("name,time\nfoo,12:30\nbar,09:15\n"), "csv");
+    }
+
+    #[test]
+    fn yaml_key_value_detected() {
+        assert_eq!(detect("name: vat\nversion: 0.1\n"), "yaml");
+        assert_eq!(detect("---\nfoo: bar\n"), "yaml");
+    }
+
+    #[test]
+    fn bare_colon_is_not_yaml() {
+        // A single time-like token or URL should not be classed YAML.
+        assert_eq!(detect("12:30\n"), "txt");
+        assert_eq!(detect("see http://example.com for info\n"), "txt");
     }
 }

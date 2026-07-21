@@ -48,6 +48,11 @@ pub struct App {
     pending_y: bool,
     /// Global line-wrap toggle
     wrap: bool,
+    /// One clipboard handle for the process lifetime. Kept alive so copied text
+    /// remains available to paste while vat is running (on X11 the selection is
+    /// served by the owning process). `None` if the platform clipboard is
+    /// unavailable.
+    clipboard: Option<Clipboard>,
 }
 
 impl App {
@@ -76,6 +81,19 @@ impl App {
             visual_start: None,
             pending_y: false,
             wrap: false,
+            clipboard: Clipboard::new().ok(),
+        }
+    }
+
+    /// Copy `text` to the clipboard, reporting the outcome in the status line.
+    /// A failed copy is surfaced rather than silently looking like success.
+    fn copy_to_clipboard(&mut self, text: String, success: String) {
+        match self.clipboard.as_mut() {
+            Some(clipboard) => match clipboard.set_text(text) {
+                Ok(()) => self.status = Some(success),
+                Err(e) => self.status = Some(format!("Clipboard error: {}", e)),
+            },
+            None => self.status = Some("Clipboard unavailable".to_string()),
         }
     }
 
@@ -154,6 +172,17 @@ impl App {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
+
+        // Restore the terminal on panic before the default hook prints, so a
+        // crash inside an engine never leaves the shell in raw mode on the
+        // alternate screen (which would require `reset` to recover).
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let _ = disable_raw_mode();
+            let _ = execute!(io::stdout(), LeaveAlternateScreen, crossterm::cursor::Show);
+            default_hook(info);
+        }));
+
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
         let res = self.run_loop(&mut terminal);
@@ -238,12 +267,8 @@ impl App {
                     if let Some(start) = self.visual_start {
                         let end = self.engine.selection();
                         if let Some(content) = self.engine.get_lines_range(start, end) {
-                            if let Ok(mut clipboard) = Clipboard::new() {
-                                let line_count = if start <= end { end - start + 1 } else { start - end + 1 };
-                                if clipboard.set_text(content).is_ok() {
-                                    self.status = Some(format!("Yanked {} line(s)", line_count));
-                                }
-                            }
+                            let line_count = if start <= end { end - start + 1 } else { start - end + 1 };
+                            self.copy_to_clipboard(content, format!("Yanked {} line(s)", line_count));
                         }
                         self.visual_start = None;
                     }
@@ -287,11 +312,7 @@ impl App {
                 if self.pending_y {
                     // yy: copy current line
                     if let Some(line) = self.engine.get_selected_line() {
-                        if let Ok(mut clipboard) = Clipboard::new() {
-                            if clipboard.set_text(line).is_ok() {
-                                self.status = Some("Yanked 1 line".to_string());
-                            }
-                        }
+                        self.copy_to_clipboard(line, "Yanked 1 line".to_string());
                     }
                     self.pending_y = false;
                 } else {

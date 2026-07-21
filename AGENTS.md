@@ -50,7 +50,6 @@ The tool uses a **Dispatcher Pattern**. Every file passed to Vat goes through th
 * **SSH:** Verify `IdentityFile` paths; group hosts by domain.
 * **Tmux:** Extract and display a "Cheat Sheet" of keybindings.
 * **Cron:** Human-readable translation of time strings.
-* **Privacy:** Automatic masking of sensitive tokens/IPs.
 
 
 
