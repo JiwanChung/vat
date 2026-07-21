@@ -437,7 +437,7 @@ impl SyntaxEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let mut output = render_markdown_with_gutter(&self.md_rendered, Some((self.selection, self.scroll)));
@@ -694,6 +694,7 @@ impl MdRenderer {
             self.lines.push(MdLine {
                 line: Line::from(self.current.drain(..).collect::<Vec<_>>()),
                 source_line: self.current_source,
+                is_heading: false,
             });
             self.current_source = None;
         }
@@ -704,6 +705,7 @@ impl MdRenderer {
         self.lines.push(MdLine {
             line: Line::from(""),
             source_line: None,
+            is_heading: false,
         });
     }
 
@@ -727,6 +729,7 @@ impl MdRenderer {
                 self.lines.push(MdLine {
                     line: Line::from(spans),
                     source_line: Some(source),
+                    is_heading: true,
                 });
                 self.blank_line();
             }
@@ -744,6 +747,7 @@ impl MdRenderer {
                     self.lines.push(MdLine {
                         line: Line::from(spans),
                         source_line: Some(source),
+                        is_heading: false,
                     });
                 }
                 self.blank_line();
@@ -761,6 +765,7 @@ impl MdRenderer {
                 self.lines.push(MdLine {
                     line: Line::from(spans),
                     source_line: Some(source),
+                    is_heading: false,
                 });
                 self.blank_line();
             }
@@ -781,6 +786,7 @@ impl MdRenderer {
                     self.lines.push(MdLine {
                         line: Line::from(spans),
                         source_line: Some(source + offset),
+                        is_heading: false,
                     });
                 }
                 self.blank_line();
@@ -877,6 +883,7 @@ impl MdRenderer {
                     self.lines.push(MdLine {
                         line: Line::from(spans),
                         source_line: Some(source),
+                        is_heading: false,
                     });
                     // Render separator after header row
                     if *is_header {
@@ -902,6 +909,7 @@ impl MdRenderer {
                         self.lines.push(MdLine {
                             line: Line::from(sep_spans),
                             source_line: None,
+                            is_heading: false,
                         });
                     }
                 }
@@ -935,6 +943,7 @@ impl MdRenderer {
                 self.lines.push(MdLine {
                     line: Line::from(spans),
                     source_line: Some(source),
+                    is_heading: false,
                 });
             }
 
@@ -1415,6 +1424,9 @@ fn heading_style(level: u8) -> Style {
 struct MdLine {
     line: Line<'static>,
     source_line: Option<usize>,
+    /// True only for heading lines, so `e` (next heading) navigation doesn't
+    /// stop on table header rows (which share the heading color+bold style).
+    is_heading: bool,
 }
 
 fn md_line_text(line: &MdLine) -> String {
@@ -1470,20 +1482,12 @@ fn render_markdown_with_gutter(
 }
 
 fn next_markdown_heading(lines: &[MdLine], current: usize) -> Option<usize> {
-    for (idx, line) in lines.iter().enumerate().skip(current + 1) {
-        for span in &line.line.spans {
-            let style = span.style;
-            if style.add_modifier.contains(ratatui::style::Modifier::BOLD)
-                && matches!(
-                    style.fg,
-                    Some(Color::LightMagenta | Color::LightCyan | Color::LightBlue | Color::LightYellow)
-                )
-            {
-                return Some(idx);
-            }
-        }
-    }
-    None
+    lines
+        .iter()
+        .enumerate()
+        .skip(current + 1)
+        .find(|(_, line)| line.is_heading)
+        .map(|(idx, _)| idx)
 }
 
 fn page_jump(view_height: usize) -> usize {

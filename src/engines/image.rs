@@ -16,6 +16,7 @@ struct ImageInfo {
     color_type: String,
     file_size: u64,
     bits_per_pixel: u16,
+    bits_per_channel: u16,
 }
 
 #[derive(Clone)]
@@ -61,6 +62,10 @@ impl ImageEngine {
 
         let color_type = format!("{:?}", color);
         let bits_per_pixel = color.bits_per_pixel();
+        // Bits per channel = bits per pixel / channel count (RGB=3, RGBA=4,
+        // grayscale=1, ...), not a hardcoded division by 3.
+        let channels = color.channel_count().max(1) as u16;
+        let bits_per_channel = bits_per_pixel / channels;
 
         let info = ImageInfo {
             width,
@@ -69,6 +74,7 @@ impl ImageEngine {
             color_type,
             file_size,
             bits_per_pixel,
+            bits_per_channel,
         };
 
         let lines = build_info_lines(&info, &file_name);
@@ -93,7 +99,7 @@ impl ImageEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let visible: Vec<Line> = self.lines
@@ -310,7 +316,7 @@ fn build_info_lines(info: &ImageInfo, file_name: &str) -> Vec<InfoLine> {
     });
     lines.push(InfoLine {
         label: "Color Depth".to_string(),
-        value: format!("{}-bit", info.bits_per_pixel.saturating_div(3)),
+        value: format!("{}-bit/channel", info.bits_per_channel),
     });
 
     lines.push(InfoLine { label: String::new(), value: String::new() });
@@ -347,6 +353,9 @@ fn build_info_lines(info: &ImageInfo, file_name: &str) -> Vec<InfoLine> {
 }
 
 fn calculate_aspect_ratio(width: u32, height: u32) -> String {
+    if width == 0 || height == 0 {
+        return format!("{}:{}", width, height);
+    }
     let gcd = gcd(width, height);
     let w = width / gcd;
     let h = height / gcd;

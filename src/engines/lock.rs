@@ -61,7 +61,7 @@ impl LockEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let slice = if self.entries.is_empty() {

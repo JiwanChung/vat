@@ -90,7 +90,7 @@ impl XmlEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let line_no_width = self.nodes.len().max(1).to_string().len().max(2);
@@ -447,12 +447,16 @@ fn parse_xml(content: &str) -> Result<Vec<XmlNode>> {
                 .map(|a| (a.name().to_string(), a.value().to_string()))
                 .collect();
 
-            let text = node
+            // Collect all direct text children (mixed content), not just the
+            // first, so `<p>a <b>x</b> b</p>` keeps both "a" and "b".
+            let combined: String = node
                 .children()
-                .find(|c| c.is_text())
-                .and_then(|c| c.text())
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty());
+                .filter(|c| c.is_text())
+                .filter_map(|c| c.text())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let normalized = combined.split_whitespace().collect::<Vec<_>>().join(" ");
+            let text = if normalized.is_empty() { None } else { Some(normalized) };
 
             let has_children = node.children().any(|c| c.is_element());
 

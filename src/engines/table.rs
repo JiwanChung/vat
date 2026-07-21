@@ -476,7 +476,7 @@ impl TableEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         // Only render the visible slice (data is already in memory, just slicing the view)

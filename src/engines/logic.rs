@@ -72,7 +72,7 @@ impl LogicEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
         let visible: Vec<Line> = self
@@ -288,45 +288,45 @@ fn colorize_logic_line(line: &str, row: usize, kind: LogicKind) -> Vec<Span<'sta
                     Style::default().fg(Color::White).bold(),
                 )];
             }
-            // Data rows: parse fixed-width columns
-            // Format: "{:<24}  {:<24}  {:<8}  {:<12}  {:<8}  {}"
-            if row >= 3 && line.len() >= 26 {
+            // Data rows: parse the fixed-width columns this engine formatted with
+            // "{:<24}  {:<24}  {:<8}  {:<12}  {:<8}  {}". The widths are in chars,
+            // so slice by character index — byte slicing would panic on any
+            // multibyte host/path.
+            let chars: Vec<char> = line.chars().collect();
+            let n = chars.len();
+            if row >= 3 && n >= 26 {
+                let slice = |a: usize, b: usize| -> String {
+                    chars.get(a..b.min(n)).map(|c| c.iter().collect()).unwrap_or_default()
+                };
+                let from = |a: usize| -> String {
+                    chars.get(a..).map(|c| c.iter().collect()).unwrap_or_default()
+                };
+                let sep = || Span::styled("  ".to_string(), Style::default());
                 let mut spans = Vec::new();
-                let host = if line.len() >= 24 { &line[..24] } else { line };
-                spans.push(Span::styled(host.to_string(), Style::default().fg(Color::Cyan)));
-                if line.len() > 26 {
-                    spans.push(Span::styled("  ".to_string(), Style::default()));
-                    let rest = &line[26..];
-                    let hostname = if rest.len() >= 24 { &rest[..24] } else { rest };
-                    spans.push(Span::styled(hostname.to_string(), Style::default().fg(Color::White)));
-                    if rest.len() > 26 {
-                        spans.push(Span::styled("  ".to_string(), Style::default()));
-                        let rest2 = &rest[26..];
-                        let port = if rest2.len() >= 8 { &rest2[..8] } else { rest2 };
-                        spans.push(Span::styled(port.to_string(), Style::default().fg(Color::Magenta)));
-                        if rest2.len() > 10 {
-                            spans.push(Span::styled("  ".to_string(), Style::default()));
-                            let rest3 = &rest2[10..];
-                            let user = if rest3.len() >= 12 { &rest3[..12] } else { rest3 };
-                            spans.push(Span::styled(user.to_string(), Style::default().fg(Color::Green)));
-                            if rest3.len() > 14 {
-                                spans.push(Span::styled("  ".to_string(), Style::default()));
-                                let rest4 = &rest3[14..];
-                                // Identity status + path
-                                let status = if rest4.len() >= 8 { &rest4[..8] } else { rest4 };
-                                let status_trimmed = status.trim();
-                                let status_color = if status_trimmed == "ok" {
-                                    Color::Green
-                                } else if status_trimmed == "missing" {
-                                    Color::Red
-                                } else {
-                                    Color::White
+                // Column char offsets: host 0..24, hostname 26..50, port 52..60,
+                // user 62..74, status 76..84, path 86..
+                spans.push(Span::styled(slice(0, 24), Style::default().fg(Color::Cyan)));
+                if n > 26 {
+                    spans.push(sep());
+                    spans.push(Span::styled(slice(26, 50), Style::default().fg(Color::White)));
+                    if n > 52 {
+                        spans.push(sep());
+                        spans.push(Span::styled(slice(52, 60), Style::default().fg(Color::Magenta)));
+                        if n > 62 {
+                            spans.push(sep());
+                            spans.push(Span::styled(slice(62, 74), Style::default().fg(Color::Green)));
+                            if n > 76 {
+                                spans.push(sep());
+                                let status = slice(76, 84);
+                                let status_color = match status.trim() {
+                                    "ok" => Color::Green,
+                                    "missing" => Color::Red,
+                                    _ => Color::White,
                                 };
-                                spans.push(Span::styled(status.to_string(), Style::default().fg(status_color)));
-                                if rest4.len() > 10 {
-                                    spans.push(Span::styled("  ".to_string(), Style::default()));
-                                    let path = &rest4[10..];
-                                    spans.push(Span::styled(path.to_string(), Style::default().fg(Color::DarkGray)));
+                                spans.push(Span::styled(status, Style::default().fg(status_color)));
+                                if n > 86 {
+                                    spans.push(sep());
+                                    spans.push(Span::styled(from(86), Style::default().fg(Color::DarkGray)));
                                 }
                             }
                         }

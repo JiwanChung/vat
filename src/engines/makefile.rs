@@ -65,7 +65,7 @@ impl MakefileEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
@@ -475,10 +475,18 @@ fn parse_makefile(content: &str) -> (Vec<(usize, String, MakeLine)>, Vec<String>
             continue;
         }
 
-        // Variable assignment
+        // A ':' that is not part of ':=' marks a rule/target — including a
+        // target-specific variable like `deploy: ENV = prod`, which must not be
+        // parsed as a global variable named "deploy: ENV".
+        let target_colon = find_target_colon(trimmed);
+
+        // Variable assignment (skipped when a target colon precedes the operator)
         let mut matched_var = false;
         for op in &[":=", "?=", "+=", "="] {
             if let Some(pos) = trimmed.find(op) {
+                if matches!(target_colon, Some(tc) if tc < pos) {
+                    break; // it's a target line, not a plain variable
+                }
                 let name = trimmed[..pos].trim().to_string();
                 let value = trimmed[pos + op.len()..].trim().to_string();
                 lines.push((line_no, raw.clone(), MakeLine::Variable {
@@ -494,19 +502,16 @@ fn parse_makefile(content: &str) -> (Vec<(usize, String, MakeLine)>, Vec<String>
             continue;
         }
 
-        // Target
-        if let Some(colon_pos) = trimmed.find(':') {
-            // Check it's not a variable with ::
-            if !trimmed[colon_pos..].starts_with("::") || trimmed[colon_pos..].starts_with("::") {
-                let name = trimmed[..colon_pos].trim().to_string();
-                let deps: Vec<String> = trimmed[colon_pos + 1..]
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                let is_phony = phony_targets.contains(&name);
-                lines.push((line_no, raw, MakeLine::Target { name, deps, is_phony }));
-                continue;
-            }
+        // Target (or target-specific variable line)
+        if let Some(colon_pos) = target_colon {
+            let name = trimmed[..colon_pos].trim().to_string();
+            let deps: Vec<String> = trimmed[colon_pos + 1..]
+                .split_whitespace()
+                .map(|s| s.to_string())
+                .collect();
+            let is_phony = phony_targets.contains(&name);
+            lines.push((line_no, raw, MakeLine::Target { name, deps, is_phony }));
+            continue;
         }
 
         // Fallback
@@ -521,6 +526,24 @@ fn parse_makefile(content: &str) -> (Vec<(usize, String, MakeLine)>, Vec<String>
     }
 
     (lines, phony_targets)
+}
+
+/// Index of the first `:` that introduces a rule target, i.e. a colon that is
+/// not the `:=` assignment operator. `::` (double-colon rules) qualifies.
+fn find_target_colon(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b':' {
+            if bytes.get(i + 1) == Some(&b'=') {
+                i += 2; // ':=' assignment operator, not a target colon
+                continue;
+            }
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
 }
 
 fn page_jump(view_height: usize) -> usize {

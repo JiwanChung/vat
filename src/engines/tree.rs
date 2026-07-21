@@ -129,7 +129,7 @@ impl TreeEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let line_no_width = self.flat.len().max(1).to_string().len().max(2);
@@ -434,13 +434,15 @@ impl TreeEngine {
             NodeKind::Null => "null".to_string(),
             NodeKind::Bool(b) => b.to_string(),
             NodeKind::Number(n) => n.clone(),
-            NodeKind::String(s) => format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")),
+            // serde_json escapes quotes, backslashes, control chars, newlines,
+            // etc. correctly — hand-rolled escaping missed all but `\` and `"`.
+            NodeKind::String(s) => json_quote(s),
             NodeKind::Object => {
                 let pairs: Vec<String> = node.children.iter().map(|&child_idx| {
                     let child = &self.arena[child_idx];
-                    let key = &child.label;
+                    let key = json_quote(&child.label);
                     let value = self.node_to_json(child_idx);
-                    format!("\"{}\": {}", key, value)
+                    format!("{}: {}", key, value)
                 }).collect();
                 format!("{{{}}}", pairs.join(", "))
             }
@@ -613,9 +615,27 @@ fn kdl_to_json(doc: &kdl::KdlDocument) -> serde_json::Value {
         if let Some(children) = node.children() {
             node_map.insert("children".to_string(), kdl_to_json(children));
         }
-        map.insert(name, serde_json::Value::Object(node_map));
+        // KDL allows repeated node names; collect duplicates into an array so no
+        // sibling is silently dropped (a plain map would keep only the last).
+        let node_value = serde_json::Value::Object(node_map);
+        match map.get_mut(&name) {
+            Some(serde_json::Value::Array(arr)) => arr.push(node_value),
+            Some(existing) => {
+                let prev = existing.take();
+                *existing = serde_json::Value::Array(vec![prev, node_value]);
+            }
+            None => {
+                map.insert(name, node_value);
+            }
+        }
     }
     serde_json::Value::Object(map)
+}
+
+/// Quote a string as a JSON string literal with correct escaping. Serializing a
+/// `&str` to JSON cannot fail, so a failure would be a bug worth surfacing.
+fn json_quote(s: &str) -> String {
+    serde_json::to_string(s).expect("serializing a string to JSON cannot fail")
 }
 
 fn kdl_value_to_json(value: &kdl::KdlValue) -> serde_json::Value {

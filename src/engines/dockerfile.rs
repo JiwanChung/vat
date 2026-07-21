@@ -62,7 +62,7 @@ impl DockerfileEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
@@ -435,19 +435,27 @@ impl DockerfileEngine {
 fn parse_dockerfile(content: &str) -> Vec<(usize, String, DockerLine)> {
     let mut lines = Vec::new();
     let mut stage_num = 0;
+
+    // Phase 1: fold `\`-continuations into logical lines (start_line_no, text).
+    // A comment is never a continuation target (even if it ends with `\`), and a
+    // continuation still open at EOF is flushed rather than dropped.
+    let mut logical: Vec<(usize, String)> = Vec::new();
     let mut continued_line = String::new();
     let mut continued_start = 0;
-
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
         let trimmed = line.trim();
 
-        // Handle line continuation
-        if trimmed.ends_with('\\') {
+        if continued_line.is_empty() && trimmed.starts_with('#') {
+            logical.push((line_no, trimmed.to_string()));
+            continue;
+        }
+
+        if let Some(stripped) = trimmed.strip_suffix('\\') {
             if continued_line.is_empty() {
                 continued_start = line_no;
             }
-            continued_line.push_str(&trimmed[..trimmed.len() - 1]);
+            continued_line.push_str(stripped);
             continued_line.push(' ');
             continue;
         }
@@ -459,15 +467,21 @@ fn parse_dockerfile(content: &str) -> Vec<(usize, String, DockerLine)> {
         } else {
             trimmed.to_string()
         };
-
-        let effective_line_no = if continued_start > 0 {
+        let start = if continued_start > 0 {
             let ln = continued_start;
             continued_start = 0;
             ln
         } else {
             line_no
         };
+        logical.push((start, full_line));
+    }
+    if !continued_line.is_empty() {
+        logical.push((continued_start.max(1), continued_line.trim_end().to_string()));
+    }
 
+    // Phase 2: classify each logical line.
+    for (effective_line_no, full_line) in logical {
         let raw = full_line.clone();
 
         if full_line.is_empty() {

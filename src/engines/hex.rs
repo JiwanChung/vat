@@ -106,7 +106,7 @@ impl HexEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         // Load visible lines into cache
@@ -250,8 +250,65 @@ impl HexEngine {
         }
     }
 
-    pub fn apply_search(&mut self, _query: &str) {
-        // TODO: Implement hex search
+    pub fn apply_search(&mut self, query: &str) {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.last_query = Some(trimmed.to_string());
+        // `0x...` searches for a byte pattern; anything else is an ASCII substring.
+        let pattern = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
+            Some(hex) => match parse_hex_bytes(hex) {
+                Some(bytes) => bytes,
+                None => return, // malformed hex: nothing to search for
+            },
+            None => trimmed.as_bytes().to_vec(),
+        };
+        if pattern.is_empty() {
+            return;
+        }
+        let from = self.selection * BYTES_PER_LINE;
+        if let Some(offset) = self.find_pattern(&pattern, from) {
+            self.selection = offset / BYTES_PER_LINE;
+        }
+    }
+
+    /// Scan the file for `pattern` starting at byte offset `from`, returning the
+    /// absolute offset of the first match (reads in overlapping chunks so a match
+    /// straddling a chunk boundary is still found).
+    fn find_pattern(&self, pattern: &[u8], from: usize) -> Option<usize> {
+        let size = self.file_size as usize;
+        if from >= size {
+            return None;
+        }
+        let mut file = File::open(&self.file_path).ok()?;
+        file.seek(SeekFrom::Start(from as u64)).ok()?;
+
+        const CHUNK: usize = 64 * 1024;
+        let overlap = pattern.len().saturating_sub(1);
+        let mut buf = vec![0u8; CHUNK];
+        let mut carry: Vec<u8> = Vec::new();
+        let mut file_pos = from; // absolute offset of the next byte to read
+
+        loop {
+            let n = file.read(&mut buf).ok()?;
+            if n == 0 {
+                return None;
+            }
+            let mut hay = Vec::with_capacity(carry.len() + n);
+            hay.extend_from_slice(&carry);
+            hay.extend_from_slice(&buf[..n]);
+            let base = file_pos - carry.len();
+            if let Some(rel) = find_subslice(&hay, pattern) {
+                return Some(base + rel);
+            }
+            let keep = overlap.min(hay.len());
+            carry = hay[hay.len() - keep..].to_vec();
+            file_pos += n;
+            if file_pos >= size {
+                return None;
+            }
+        }
     }
 
     pub fn apply_filter(&mut self, _query: &str) {}
@@ -420,4 +477,46 @@ fn format_size(bytes: u64) -> String {
 fn page_jump(view_height: usize) -> usize {
     let half = view_height / 2;
     if half == 0 { 1 } else { half }
+}
+
+/// Parse a hex byte string (whitespace ignored), e.g. "de ad be ef" -> bytes.
+/// Returns `None` if empty or not a whole number of bytes / not valid hex.
+fn parse_hex_bytes(s: &str) -> Option<Vec<u8>> {
+    let cleaned: String = s.chars().filter(|c| !c.is_whitespace()).collect();
+    if cleaned.is_empty() || cleaned.len() % 2 != 0 {
+        return None;
+    }
+    (0..cleaned.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&cleaned[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// Index of the first occurrence of `needle` in `hay`, or `None`.
+fn find_subslice(hay: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || hay.len() < needle.len() {
+        return None;
+    }
+    (0..=hay.len() - needle.len()).find(|&i| &hay[i..i + needle.len()] == needle)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_hex_bytes_valid_and_invalid() {
+        assert_eq!(parse_hex_bytes("deadbeef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+        assert_eq!(parse_hex_bytes("de ad be ef"), Some(vec![0xde, 0xad, 0xbe, 0xef]));
+        assert_eq!(parse_hex_bytes("abc"), None); // odd nibble count
+        assert_eq!(parse_hex_bytes("zz"), None); // not hex
+        assert_eq!(parse_hex_bytes(""), None);
+    }
+
+    #[test]
+    fn find_subslice_finds_match() {
+        assert_eq!(find_subslice(b"hello world", b"world"), Some(6));
+        assert_eq!(find_subslice(b"hello", b"xyz"), None);
+        assert_eq!(find_subslice(b"abc", b""), None);
+    }
 }

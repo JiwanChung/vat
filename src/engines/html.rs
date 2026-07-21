@@ -64,7 +64,7 @@ impl HtmlEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let slice = if visible.is_empty() {
@@ -150,7 +150,7 @@ impl HtmlEngine {
         }
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
-                if self.selection + 1 < self.rows.len() {
+                if self.selection + 1 < self.visible_rows().len() {
                     self.selection += 1;
                 }
             }

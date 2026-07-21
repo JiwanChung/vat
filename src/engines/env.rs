@@ -62,7 +62,7 @@ impl EnvEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         if wrap {
@@ -453,9 +453,11 @@ fn parse_env(content: &str) -> Vec<EnvEntry> {
             let key = trimmed[..eq_pos].trim().to_string();
             let mut value = trimmed[eq_pos + 1..].trim().to_string();
 
-            // Remove quotes if present
-            if (value.starts_with('"') && value.ends_with('"'))
-                || (value.starts_with('\'') && value.ends_with('\''))
+            // Remove surrounding matching quotes. Requires at least two chars so
+            // a lone `"` (which both starts and ends with `"`) does not underflow.
+            if value.len() >= 2
+                && ((value.starts_with('"') && value.ends_with('"'))
+                    || (value.starts_with('\'') && value.ends_with('\'')))
             {
                 value = value[1..value.len() - 1].to_string();
             }

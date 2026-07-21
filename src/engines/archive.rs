@@ -84,7 +84,7 @@ impl ArchiveEngine {
         if self.selection < self.scroll {
             self.scroll = self.selection;
         } else if self.selection >= self.scroll + height {
-            self.scroll = self.selection.saturating_sub(height - 1);
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
 
         let visible: Vec<Line> = self.entries
@@ -261,20 +261,25 @@ impl ArchiveEngine {
     }
 
     pub fn breadcrumbs(&self) -> String {
-        let ratio = if self.total_size > 0 {
-            (self.total_compressed as f64 / self.total_size as f64 * 100.0) as u64
-        } else {
-            100
-        };
-        format!(
-            "{} [{}] {} files, {} -> {} ({}%)",
+        let base = format!(
+            "{} [{}] {} files, {}",
             self.file_name,
             self.archive_type,
             self.entries.len(),
             format_size(self.total_size),
-            format_size(self.total_compressed),
-            ratio
-        )
+        );
+        // tar entries carry no per-file compressed size, so only show the
+        // compressed total / ratio when the archive actually provides it.
+        if self.entries.iter().any(|e| e.compressed_size.is_some()) {
+            let ratio = if self.total_size > 0 {
+                (self.total_compressed as f64 / self.total_size as f64 * 100.0) as u64
+            } else {
+                100
+            };
+            format!("{} -> {} ({}%)", base, format_size(self.total_compressed), ratio)
+        } else {
+            base
+        }
     }
 
     pub fn status_line(&self) -> String {
