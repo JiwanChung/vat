@@ -25,6 +25,8 @@ struct InputState {
     buffer: String,
     /// If true, input is for filter mode instead of search
     is_filter: bool,
+    /// If true, input is a `:N` go-to-line prompt
+    is_goto: bool,
 }
 
 pub struct App {
@@ -48,6 +50,8 @@ pub struct App {
     pending_y: bool,
     /// Global line-wrap toggle
     wrap: bool,
+    /// Accumulated numeric count prefix (e.g. `10j`, `25G`).
+    pending_count: Option<usize>,
     /// One clipboard handle for the process lifetime. Kept alive so copied text
     /// remains available to paste while vat is running (on X11 the selection is
     /// served by the owning process). `None` if the platform clipboard is
@@ -70,6 +74,7 @@ impl App {
                 active: false,
                 buffer: String::new(),
                 is_filter: false,
+                is_goto: false,
             },
             status: None,
             file_path,
@@ -82,6 +87,19 @@ impl App {
             pending_y: false,
             wrap: false,
             clipboard: Clipboard::new().ok(),
+            pending_count: None,
+        }
+    }
+
+    /// Jump to a 1-based line number by going to the top and stepping down.
+    /// This works for every engine without a per-engine goto method.
+    fn goto_line(&mut self, line: usize) {
+        let g = KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE);
+        self.engine.handle_key(g);
+        self.engine.handle_key(g);
+        let down = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+        for _ in 1..line.max(1) {
+            self.engine.handle_key(down);
         }
     }
 
@@ -232,7 +250,11 @@ impl App {
                 }
                 KeyCode::Enter => {
                     let query = self.input.buffer.trim().to_string();
-                    if !query.is_empty() {
+                    if self.input.is_goto {
+                        if let Ok(n) = query.parse::<usize>() {
+                            self.goto_line(n);
+                        }
+                    } else if !query.is_empty() {
                         if self.input.is_filter {
                             self.filter = Some(query.clone());
                             self.engine.apply_filter(&query);
@@ -309,12 +331,41 @@ impl App {
             self.pending_y = false;
         }
 
+        // Accumulate a numeric count prefix (e.g. `10j`, `25G`). A leading `0`
+        // is passed through (no count semantics) rather than starting a count.
+        if let KeyCode::Char(c) = key.code {
+            if c.is_ascii_digit() && !(self.pending_count.is_none() && c == '0') {
+                let d = c.to_digit(10).unwrap() as usize;
+                self.pending_count =
+                    Some(self.pending_count.unwrap_or(0).saturating_mul(10).saturating_add(d));
+                return;
+            }
+        }
+        // This keypress consumes (or discards) any accumulated count.
+        let count = self.pending_count.take();
+
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
             }
             KeyCode::Char('?') => {
                 self.show_help = true;
+            }
+            KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('k') | KeyCode::Up => {
+                for _ in 0..count.unwrap_or(1) {
+                    self.engine.handle_key(key);
+                }
+            }
+            KeyCode::Char('G') => match count {
+                Some(n) => self.goto_line(n), // NG: jump to line N
+                None => self.engine.handle_key(key),
+            },
+            KeyCode::Char(':') => {
+                // Open a `:N` go-to-line prompt.
+                self.input.active = true;
+                self.input.is_filter = false;
+                self.input.is_goto = true;
+                self.input.buffer.clear();
             }
             KeyCode::Char('y') => {
                 if self.pending_y {
@@ -337,6 +388,7 @@ impl App {
                 if self.engine.supports_search() {
                     self.input.active = true;
                     self.input.is_filter = false;
+                    self.input.is_goto = false;
                     self.input.buffer.clear();
                 }
             }
@@ -344,6 +396,7 @@ impl App {
                 if self.engine.supports_search() {
                     self.input.active = true;
                     self.input.is_filter = true;
+                    self.input.is_goto = false;
                     self.input.buffer.clear();
                 }
             }
@@ -403,7 +456,13 @@ impl App {
 
         if self.input.active {
             // Render search/filter input box
-            let (icon, label) = if self.input.is_filter { ("◉", "Filter") } else { ("⌕", "Search") };
+            let (icon, label) = if self.input.is_goto {
+                (":", "Goto line")
+            } else if self.input.is_filter {
+                ("◉", "Filter")
+            } else {
+                ("⌕", "Search")
+            };
             let input_line = Line::from(vec![
                 Span::styled(
                     format!(" {} {} ", icon, label),
@@ -515,6 +574,8 @@ impl App {
             Line::from("  j/k, ↑/↓     Move up/down"),
             Line::from("  gg           Jump to top"),
             Line::from("  G            Jump to bottom"),
+            Line::from("  :N           Go to line N"),
+            Line::from("  Nj/Nk/NG     Count prefix (e.g. 10j, 25G)"),
             Line::from("  Ctrl+u/d     Half-page up/down"),
             Line::from(""),
             Line::from(vec![
@@ -817,4 +878,57 @@ pub enum Paging {
     Auto,
     Always,
     Never,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)
+    }
+
+    fn app_with_lines(n: usize) -> App {
+        use std::io::Write;
+        let mut f = tempfile::Builder::new().suffix(".txt").tempfile().unwrap();
+        for i in 1..=n {
+            writeln!(f, "line {}", i).unwrap();
+        }
+        f.flush().unwrap();
+        let path = f.path().to_path_buf();
+        let engine = crate::analyzer::analyze(&path).unwrap();
+        std::mem::forget(f); // keep the mmap-backed file on disk for the test
+        App::new(engine, "test".into(), path, Paging::Never, false)
+    }
+
+    #[test]
+    fn count_prefix_and_goto() {
+        let mut app = app_with_lines(100);
+        // 50G -> line 50 (0-based selection 49)
+        for c in ['5', '0', 'G'] {
+            app.handle_key(key(c));
+        }
+        assert_eq!(app.engine.selection(), 49, "50G should select line 50");
+
+        // gg then 10j -> line 11 (selection 10)
+        app.handle_key(key('g'));
+        app.handle_key(key('g'));
+        for c in ['1', '0', 'j'] {
+            app.handle_key(key(c));
+        }
+        assert_eq!(app.engine.selection(), 10, "gg then 10j should select line 11");
+    }
+
+    #[test]
+    fn goto_line_prompt() {
+        let mut app = app_with_lines(100);
+        // ':' opens goto prompt; type 30 then Enter -> line 30 (selection 29)
+        app.handle_key(key(':'));
+        assert!(app.input.active && app.input.is_goto);
+        app.handle_key(key('3'));
+        app.handle_key(key('0'));
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.engine.selection(), 29, ":30 should select line 30");
+    }
 }
