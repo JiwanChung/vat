@@ -6,6 +6,16 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 /// Maximum size for engines that load a whole file into a `String`.
 pub(crate) const MAX_TEXT_FILE_SIZE: u64 = 50 * 1024 * 1024;
 
+/// Read a file's raw bytes, capped at [`MAX_TEXT_FILE_SIZE`].
+pub(crate) fn read_text_file_bytes(path: &std::path::Path) -> anyhow::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut handle = file.take(MAX_TEXT_FILE_SIZE);
+    let mut bytes = Vec::new();
+    handle.read_to_end(&mut bytes)?;
+    Ok(bytes)
+}
+
 /// Read a text file into a `String`, capped at [`MAX_TEXT_FILE_SIZE`] and
 /// tolerant of invalid UTF-8 (lossily replaced) so a single bad byte does not
 /// abort the whole program. Used by engines that need the full file in memory.
@@ -51,6 +61,7 @@ pub(crate) fn pad_start_to_width(s: &str, width: usize) -> String {
 }
 
 mod archive;
+pub(crate) mod cert;
 mod dockerfile;
 mod env;
 mod gitignore;

@@ -36,6 +36,14 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return XmlEngine::from_path(path).map(EngineState::Xml);
     }
 
+    // X.509 certificates (PEM/DER). If it isn't a certificate (e.g. a private
+    // key), fall through to a plain text/syntax view.
+    if matches!(ext.as_str(), "pem" | "crt" | "cer" | "der") {
+        if let Ok(value) = crate::engines::cert::decode(path) {
+            return Ok(EngineState::Tree(TreeEngine::from_json_value(value, file_name)));
+        }
+    }
+
     // SQLite database files
     if matches!(ext.as_str(), "db" | "sqlite" | "sqlite3") {
         return SqliteEngine::from_path(path).map(EngineState::Sqlite);

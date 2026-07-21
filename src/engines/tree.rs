@@ -97,6 +97,28 @@ impl TreeEngine {
         Self::from_bytes_internal(ext, bytes)
     }
 
+    /// Build a tree directly from a JSON value (used by engines that decode
+    /// non-JSON formats into a structured value, e.g. certificates).
+    pub fn from_json_value(value: serde_json::Value, root_label: &str) -> Self {
+        let mut arena = Vec::new();
+        let root = build_json_node(&value, root_label.to_string(), &mut arena);
+        let mut engine = Self {
+            arena,
+            root,
+            selection: 0,
+            scroll: 0,
+            collapsed: HashSet::new(),
+            flat: Vec::new(),
+            last_query: None,
+            pending_g: false,
+            last_view_height: 0,
+            last_match: None,
+            visual_range: None,
+        };
+        engine.rebuild_flat();
+        engine
+    }
+
     fn from_bytes_internal(ext: &str, bytes: &[u8]) -> Result<Self> {
         let value = parse_value(ext, bytes)?;
         let mut arena = Vec::new();

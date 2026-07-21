@@ -941,6 +941,8 @@ fn language_label(ext: &str) -> &'static str {
         "py" => "Python",
         "css" | "tcss" => "CSS",
         "md" => "Markdown",
+        "pem" | "crt" | "cer" | "der" => "Certificate",
+        "ipynb" => "Notebook",
         "json" => "JSON",
         "yaml" | "yml" => "YAML",
         "toml" => "TOML",

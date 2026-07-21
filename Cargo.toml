@@ -46,3 +46,4 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 unicode-width = "0.1"
 clap_complete = "4"
 clap_mangen = "0.2"
+x509-parser = "0.16"
