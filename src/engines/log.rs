@@ -377,7 +377,7 @@ impl LogEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         let visible = self.visible_entries();
         let total = visible.len().max(1);
         let start = if forward {
@@ -393,7 +393,7 @@ impl LogEngine {
                 (start + total - offset % total) % total
             };
             if let Some(&entry_idx) = visible.get(idx) {
-                if self.entries[entry_idx].1.raw.to_lowercase().contains(&lower) {
+                if matcher.is_match(&self.entries[entry_idx].1.raw) {
                     self.selection = idx;
                     break;
                 }

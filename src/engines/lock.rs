@@ -506,7 +506,7 @@ impl LockEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let total = self.entries.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -520,14 +520,14 @@ impl LockEngine {
                 (start + total - offset % total) % total
             };
             let entry = &self.entries[idx];
-            if entry.name.to_lowercase().contains(&lower)
-                || entry.version.to_lowercase().contains(&lower)
-                || entry.source.to_lowercase().contains(&lower)
-                || entry.checksum.to_lowercase().contains(&lower)
+            if matcher.is_match(&entry.name)
+                || matcher.is_match(&entry.version)
+                || matcher.is_match(&entry.source)
+                || matcher.is_match(&entry.checksum)
                 || entry
                     .dependencies
                     .iter()
-                    .any(|dep| dep.to_lowercase().contains(&lower))
+                    .any(|dep| matcher.is_match(&dep))
             {
                 self.selection = idx;
                 break;

@@ -485,7 +485,7 @@ impl LogicEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let total = self.lines.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -498,7 +498,7 @@ impl LogicEngine {
             } else {
                 (start + total - offset % total) % total
             };
-            if self.lines[idx].to_lowercase().contains(&lower) {
+            if matcher.is_match(&self.lines[idx]) {
                 self.selection = idx;
                 break;
             }

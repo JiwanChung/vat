@@ -401,7 +401,7 @@ impl XmlEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         let visible = self.visible_nodes();
         let total = visible.len().max(1);
         let start = if forward {
@@ -424,7 +424,7 @@ impl XmlEngine {
                     node.attributes.iter().map(|(k, v)| format!("{}={}", k, v)).collect::<Vec<_>>().join(" "),
                     node.text.as_deref().unwrap_or("")
                 );
-                if searchable.to_lowercase().contains(&lower) {
+                if matcher.is_match(&searchable) {
                     self.selection = idx;
                     break;
                 }

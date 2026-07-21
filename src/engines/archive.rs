@@ -343,7 +343,7 @@ impl ArchiveEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         let total = self.entries.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -357,7 +357,7 @@ impl ArchiveEngine {
             } else {
                 (start + total - offset % total) % total
             };
-            if self.entries[idx].path.to_lowercase().contains(&lower) {
+            if matcher.is_match(&self.entries[idx].path) {
                 self.selection = idx;
                 break;
             }

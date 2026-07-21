@@ -521,7 +521,7 @@ impl SqliteEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         self.last_match = Some(query.to_string());
 
         // In Preview mode, search row values first and move the selection.
@@ -540,7 +540,7 @@ impl SqliteEngine {
                 };
                 if self.preview_rows[idx]
                     .iter()
-                    .any(|v| v.to_lowercase().contains(&lower))
+                    .any(|v| matcher.is_match(&v))
                 {
                     self.selection = idx;
                     return;
@@ -550,8 +550,8 @@ impl SqliteEngine {
 
         // Otherwise jump to a table/column by name.
         for (idx, table) in self.tables.iter().enumerate() {
-            let name_hit = table.name.to_lowercase().contains(&lower)
-                || table.columns.iter().any(|c| c.name.to_lowercase().contains(&lower));
+            let name_hit = matcher.is_match(&table.name)
+                || table.columns.iter().any(|c| matcher.is_match(&c.name));
             if name_hit {
                 self.current_table = idx;
                 self.refresh_preview();

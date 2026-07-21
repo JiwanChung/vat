@@ -1526,7 +1526,7 @@ impl SyntaxEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         if self.is_markdown {
             let total = self.md_rendered.len().max(1);
             let start = if forward {
@@ -1540,7 +1540,7 @@ impl SyntaxEngine {
                 } else {
                     (start + total - offset % total) % total
                 };
-                if md_line_text(&self.md_rendered[idx]).to_lowercase().contains(&lower) {
+                if matcher.is_match(&md_line_text(&self.md_rendered[idx])) {
                     self.selection = idx;
                     break;
                 }
@@ -1558,7 +1558,7 @@ impl SyntaxEngine {
                 } else {
                     (start + total - offset % total) % total
                 };
-                if self.lines[idx].to_lowercase().contains(&lower) {
+                if matcher.is_match(&self.lines[idx]) {
                     self.selection = idx;
                     break;
                 }

@@ -388,7 +388,7 @@ impl MakefileEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         let total = self.lines.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -411,7 +411,7 @@ impl MakefileEngine {
                 MakeLine::Conditional(text) => text.clone(),
                 MakeLine::Empty => String::new(),
             };
-            if text.to_lowercase().contains(&lower) {
+            if matcher.is_match(&text) {
                 self.selection = idx;
                 break;
             }

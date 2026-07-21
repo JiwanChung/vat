@@ -692,7 +692,7 @@ impl TreeEngine {
             return;
         }
         self.rebuild_flat();
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let total = self.flat.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -706,8 +706,8 @@ impl TreeEngine {
                 (start + total - offset % total) % total
             };
             let flat = &self.flat[idx];
-            if flat.label.to_lowercase().contains(&lower)
-                || flat.value_preview.to_lowercase().contains(&lower)
+            if matcher.is_match(&flat.label)
+                || matcher.is_match(&flat.value_preview)
             {
                 self.selection = idx;
                 break;

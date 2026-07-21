@@ -438,7 +438,7 @@ impl HtmlEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let visible = self.visible_rows();
         let total = visible.len().max(1);
         let start = if forward {
@@ -453,12 +453,12 @@ impl HtmlEngine {
                 (start + total - offset % total) % total
             };
             let row = &self.rows[visible[idx]];
-            if row.tag.to_lowercase().contains(&lower)
-                || row.id.to_lowercase().contains(&lower)
-                || row.class.to_lowercase().contains(&lower)
-                || row.text.to_lowercase().contains(&lower)
+            if matcher.is_match(&row.tag)
+                || matcher.is_match(&row.id)
+                || matcher.is_match(&row.class)
+                || matcher.is_match(&row.text)
                 || row.attrs.iter().any(|(k, v)| {
-                    k.to_lowercase().contains(&lower) || v.to_lowercase().contains(&lower)
+                    matcher.is_match(&k) || matcher.is_match(&v)
                 })
             {
                 self.selection = idx;

@@ -640,7 +640,7 @@ impl TableEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let total = self.df.height().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -656,7 +656,7 @@ impl TableEngine {
             let mut hit = false;
             for series in self.df.get_columns() {
                 if let Ok(value) = series.get(idx) {
-                    if value.to_string().to_lowercase().contains(&lower) {
+                    if matcher.is_match(&value.to_string()) {
                         hit = true;
                         break;
                     }

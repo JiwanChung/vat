@@ -353,7 +353,7 @@ impl JsonlEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         // Search in display space so the match lands on the highlighted line even
         // under an active filter.
         let total = self.display_count().max(1);
@@ -371,7 +371,7 @@ impl JsonlEngine {
             };
             if let Some(actual) = self.display_to_actual(disp) {
                 if let Some(line) = self.get_line(actual) {
-                    if line.to_lowercase().contains(&lower) {
+                    if matcher.is_match(&line) {
                         self.selection = disp;
                         break;
                     }
@@ -410,11 +410,11 @@ impl JsonlEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let mut matches = Vec::new();
         for idx in 0..self.line_count() {
             if let Some(line) = self.get_line(idx) {
-                if line.to_lowercase().contains(&lower) {
+                if matcher.is_match(&line) {
                     matches.push(idx);
                 }
             }

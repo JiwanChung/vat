@@ -234,11 +234,11 @@ impl TextEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         let mut matches = Vec::new();
         for idx in 0..self.line_count() {
             if let Some(line) = self.get_line(idx) {
-                if line.to_lowercase().contains(&lower) {
+                if matcher.is_match(&line) {
                     matches.push(idx);
                 }
             }
@@ -348,7 +348,7 @@ impl TextEngine {
         if trimmed.is_empty() {
             return;
         }
-        let lower = trimmed.to_lowercase();
+        let matcher = crate::search::Matcher::new(trimmed);
         // Search in display space so the match lands on the highlighted line even
         // when a filter is active (`selection` is a display index).
         let total = self.display_count().max(1);
@@ -366,7 +366,7 @@ impl TextEngine {
             };
             if let Some(actual) = self.display_to_actual(disp) {
                 if let Some(line) = self.get_line(actual) {
-                    if line.to_lowercase().contains(&lower) {
+                    if matcher.is_match(&line) {
                         self.selection = disp;
                         break;
                     }

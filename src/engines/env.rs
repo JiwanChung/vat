@@ -410,7 +410,7 @@ impl EnvEngine {
     }
 
     fn search_next(&mut self, query: &str, forward: bool) {
-        let lower = query.to_lowercase();
+        let matcher = crate::search::Matcher::new(query);
         let total = self.entries.len().max(1);
         let start = if forward {
             (self.selection + 1) % total
@@ -425,9 +425,9 @@ impl EnvEngine {
                 (start + total - offset % total) % total
             };
             let entry = &self.entries[idx];
-            if entry.key.to_lowercase().contains(&lower)
-                || entry.value.to_lowercase().contains(&lower)
-                || entry.category.to_lowercase().contains(&lower)
+            if matcher.is_match(&entry.key)
+                || matcher.is_match(&entry.value)
+                || matcher.is_match(&entry.category)
             {
                 self.selection = idx;
                 break;

@@ -7,6 +7,7 @@ use clap::{Parser, ValueEnum};
 mod analyzer;
 mod app;
 mod engines;
+mod search;
 
 #[derive(Parser, Debug)]
 #[command(name = "vat", version, about = "Semantic file viewer")]
