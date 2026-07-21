@@ -521,7 +521,7 @@ impl App {
                 Span::styled("Search & Filter", Style::default().bold()),
             ]),
             Line::from("  /            Search"),
-            Line::from("  f            Filter (show only matches)"),
+            Line::from("  f            Filter to matches (text/JSONL); jump to match elsewhere"),
             Line::from("  F            Clear filter"),
             Line::from("  n/N          Next/previous match"),
             Line::from(""),

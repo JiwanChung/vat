@@ -246,6 +246,8 @@ impl HexEngine {
                     self.selection = total - 1;
                 }
             }
+            KeyCode::Char('n') => self.search_next(true),
+            KeyCode::Char('N') => self.search_next(false),
             _ => {}
         }
     }
@@ -256,27 +258,72 @@ impl HexEngine {
             return;
         }
         self.last_query = Some(trimmed.to_string());
-        // `0x...` searches for a byte pattern; anything else is an ASCII substring.
-        let pattern = match trimmed.strip_prefix("0x").or_else(|| trimmed.strip_prefix("0X")) {
-            Some(hex) => match parse_hex_bytes(hex) {
-                Some(bytes) => bytes,
-                None => return, // malformed hex: nothing to search for
-            },
-            None => trimmed.as_bytes().to_vec(),
+        // Search from the current line so the first match on/after it is found.
+        self.run_search(self.selection * BYTES_PER_LINE, true);
+    }
+
+    /// Parse the active query into a search pattern. `0x...` is a byte pattern;
+    /// anything else is an ASCII substring.
+    fn current_pattern(&self) -> Option<Vec<u8>> {
+        let q = self.last_query.as_ref()?;
+        let bytes = match q.strip_prefix("0x").or_else(|| q.strip_prefix("0X")) {
+            Some(hex) => parse_hex_bytes(hex)?,
+            None => q.as_bytes().to_vec(),
         };
-        if pattern.is_empty() {
-            return;
+        if bytes.is_empty() {
+            None
+        } else {
+            Some(bytes)
         }
-        let from = self.selection * BYTES_PER_LINE;
-        if let Some(offset) = self.find_pattern(&pattern, from) {
+    }
+
+    /// Search forward (or backward) from byte offset `from`, wrapping around the
+    /// end (or start) of the file, and move the selection to the match line.
+    fn run_search(&mut self, from: usize, forward: bool) {
+        let pattern = match self.current_pattern() {
+            Some(p) => p,
+            None => return,
+        };
+        let hit = if forward {
+            self.find_forward(&pattern, from)
+                .or_else(|| self.find_forward(&pattern, 0))
+        } else {
+            self.find_backward(&pattern, from)
+                .or_else(|| self.find_backward(&pattern, self.file_size as usize))
+        };
+        if let Some(offset) = hit {
             self.selection = offset / BYTES_PER_LINE;
         }
+    }
+
+    /// `n`/`N`: jump to the next/previous match of the active query.
+    fn search_next(&mut self, forward: bool) {
+        let from = if forward {
+            (self.selection + 1) * BYTES_PER_LINE
+        } else {
+            self.selection * BYTES_PER_LINE
+        };
+        self.run_search(from, forward);
+    }
+
+    /// Last match of `pattern` strictly before byte offset `before`, or `None`.
+    fn find_backward(&self, pattern: &[u8], before: usize) -> Option<usize> {
+        let mut last = None;
+        let mut from = 0;
+        while let Some(off) = self.find_forward(pattern, from) {
+            if off + pattern.len() > before {
+                break;
+            }
+            last = Some(off);
+            from = off + 1;
+        }
+        last
     }
 
     /// Scan the file for `pattern` starting at byte offset `from`, returning the
     /// absolute offset of the first match (reads in overlapping chunks so a match
     /// straddling a chunk boundary is still found).
-    fn find_pattern(&self, pattern: &[u8], from: usize) -> Option<usize> {
+    fn find_forward(&self, pattern: &[u8], from: usize) -> Option<usize> {
         let size = self.file_size as usize;
         if from >= size {
             return None;
@@ -518,5 +565,27 @@ mod tests {
         assert_eq!(find_subslice(b"hello world", b"world"), Some(6));
         assert_eq!(find_subslice(b"hello", b"xyz"), None);
         assert_eq!(find_subslice(b"abc", b""), None);
+    }
+
+    #[test]
+    fn search_reaches_all_matches_with_wrap() {
+        use std::io::Write;
+        // Two "MARK" occurrences on different 16-byte lines.
+        let mut data = vec![b'.'; 16 * 5];
+        data[4..8].copy_from_slice(b"MARK"); // line 0
+        data[16 * 3 + 2..16 * 3 + 6].copy_from_slice(b"MARK"); // line 3
+        let mut f = tempfile::Builder::new().suffix(".bin").tempfile().unwrap();
+        f.write_all(&data).unwrap();
+        f.flush().unwrap();
+        let mut e = HexEngine::from_path(f.path()).unwrap();
+
+        e.apply_search("MARK");
+        assert_eq!(e.selection, 0, "first match on line 0");
+        e.search_next(true); // n -> next match
+        assert_eq!(e.selection, 3, "second match on line 3");
+        e.search_next(true); // n -> wraps back to line 0
+        assert_eq!(e.selection, 0, "wraps to first");
+        e.search_next(false); // N -> previous (line 3)
+        assert_eq!(e.selection, 3, "backward to line 3");
     }
 }

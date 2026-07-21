@@ -244,18 +244,17 @@ impl SqliteEngine {
                 });
                 let cells: Vec<Cell> = row
                     .iter()
-                    .map(|v| {
-                        // Color by value type
+                    .enumerate()
+                    .map(|(i, v)| {
+                        // Color by the column's declared type, not by parsing the
+                        // value (so a TEXT cell "123" is not shown as a number).
                         let style = if v == "NULL" {
                             Style::default().fg(Color::DarkGray)
                         } else if v == "[BLOB]" {
                             Style::default().fg(Color::DarkGray).italic()
-                        } else if v.parse::<f64>().is_ok() {
-                            Style::default().fg(Color::Magenta)
-                        } else if v == "true" || v == "false" || v == "1" || v == "0" {
-                            Style::default().fg(Color::Cyan)
                         } else {
-                            Style::default().fg(Color::Yellow)
+                            let col_type = table.columns.get(i).map(|c| c.col_type.as_str()).unwrap_or("");
+                            Style::default().fg(column_color(col_type))
                         };
                         Cell::from(v.clone()).style(style)
                     })
@@ -521,24 +520,67 @@ impl SqliteEngine {
         lines
     }
 
-    fn search_next(&mut self, query: &str, _forward: bool) {
+    fn search_next(&mut self, query: &str, forward: bool) {
         let lower = query.to_lowercase();
-        // Search in table names and column names
-        for (idx, table) in self.tables.iter().enumerate() {
-            if table.name.to_lowercase().contains(&lower) {
-                self.current_table = idx;
-                self.refresh_preview();
-                return;
-            }
-            for col in &table.columns {
-                if col.name.to_lowercase().contains(&lower) {
-                    self.current_table = idx;
-                    self.refresh_preview();
+        self.last_match = Some(query.to_string());
+
+        // In Preview mode, search row values first and move the selection.
+        if matches!(self.view_mode, ViewMode::Preview) && !self.preview_rows.is_empty() {
+            let total = self.preview_rows.len();
+            let start = if forward {
+                (self.selection + 1) % total
+            } else {
+                (self.selection + total - 1) % total
+            };
+            for offset in 0..total {
+                let idx = if forward {
+                    (start + offset) % total
+                } else {
+                    (start + total - offset) % total
+                };
+                if self.preview_rows[idx]
+                    .iter()
+                    .any(|v| v.to_lowercase().contains(&lower))
+                {
+                    self.selection = idx;
                     return;
                 }
             }
         }
-        self.last_match = Some(query.to_string());
+
+        // Otherwise jump to a table/column by name.
+        for (idx, table) in self.tables.iter().enumerate() {
+            let name_hit = table.name.to_lowercase().contains(&lower)
+                || table.columns.iter().any(|c| c.name.to_lowercase().contains(&lower));
+            if name_hit {
+                self.current_table = idx;
+                self.refresh_preview();
+                self.selection = 0;
+                self.scroll = 0;
+                return;
+            }
+        }
+    }
+}
+
+/// Foreground color for a SQLite cell based on its column's declared type,
+/// using SQLite's type-affinity rules.
+fn column_color(col_type: &str) -> Color {
+    let t = col_type.to_uppercase();
+    if t.contains("BOOL") {
+        Color::Cyan
+    } else if t.contains("INT")
+        || t.contains("REAL")
+        || t.contains("FLOA")
+        || t.contains("DOUB")
+        || t.contains("NUMERIC")
+        || t.contains("DEC")
+    {
+        Color::Magenta
+    } else if t.contains("CHAR") || t.contains("TEXT") || t.contains("CLOB") {
+        Color::Yellow
+    } else {
+        Color::White
     }
 }
 
@@ -613,4 +655,20 @@ fn get_preview_rows(conn: &Connection, table_name: &str, columns: &[ColumnInfo])
 fn page_jump(view_height: usize) -> usize {
     let half = view_height / 2;
     if half == 0 { 1 } else { half }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_color_by_affinity() {
+        assert_eq!(column_color("INTEGER"), Color::Magenta);
+        assert_eq!(column_color("REAL"), Color::Magenta);
+        assert_eq!(column_color("NUMERIC"), Color::Magenta);
+        assert_eq!(column_color("VARCHAR(20)"), Color::Yellow);
+        assert_eq!(column_color("TEXT"), Color::Yellow);
+        assert_eq!(column_color("BOOLEAN"), Color::Cyan);
+        assert_eq!(column_color("BLOB"), Color::White);
+    }
 }
