@@ -16,6 +16,10 @@ use syntect::easy::HighlightLines;
 use syntect::highlighting::{Style as SynStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 
+/// Above this line count, skip syntax highlighting to keep open latency and
+/// memory bounded (the file still renders, just without colors).
+const MAX_HIGHLIGHT_LINES: usize = 50_000;
+
 struct ComponentInfo {
     name: String,
     props: Option<String>,
@@ -34,6 +38,12 @@ pub struct SyntaxEngine {
     last_query: Option<String>,
     is_css: bool,
     is_markdown: bool,
+    /// Whether to syntax-highlight (a syntax exists and the file is small
+    /// enough). Large files render plain to avoid an O(n) highlight per open.
+    highlight_enabled: bool,
+    /// Syntect-highlighted content spans per source line, built once lazily.
+    /// Empty when `highlight_enabled` is false.
+    highlight_cache: Vec<Vec<Span<'static>>>,
     md_rendered: Vec<MdLine>,
     syntax_error_lines: HashSet<usize>,
     pending_g: bool,
@@ -69,6 +79,10 @@ impl SyntaxEngine {
             .map(|s| s.name.clone());
         let is_css = matches!(ext, "css" | "tcss");
         let is_markdown = ext == "md";
+        // Only cache-highlight when a syntax is known and the file is under the
+        // line cap; otherwise render plain (cheap, O(visible) per frame).
+        let highlight_enabled =
+            !is_markdown && syntax.is_some() && lines.len() <= MAX_HIGHLIGHT_LINES;
         let components = if matches!(ext, "jsx" | "tsx" | "js" | "ts") {
             extract_components(&content, ext)
         } else {
@@ -95,6 +109,8 @@ impl SyntaxEngine {
             last_query: None,
             is_css,
             is_markdown,
+            highlight_enabled,
+            highlight_cache: Vec::new(),
             md_rendered,
             syntax_error_lines,
             pending_g: false,
@@ -139,37 +155,23 @@ impl SyntaxEngine {
             return render_markdown_with_gutter(&self.md_rendered, None);
         }
 
-        let mut output = Vec::new();
+        self.ensure_highlight_cache();
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
-        let syntax = self
-            .syntax
-            .as_ref()
-            .and_then(|name| self.syntax_set.find_syntax_by_name(name));
-        let mut highlighter = syntax
-            .map(|syn| HighlightLines::new(syn, &self.theme));
-        for (idx, line) in self.lines.iter().enumerate() {
+        let mut output = Vec::with_capacity(self.lines.len());
+        for idx in 0..self.lines.len() {
             let mut spans = Vec::new();
             let line_no = format!("{:>width$} ", idx + 1, width = line_no_width);
-            spans.push(Span::styled(
-                line_no,
-                Style::default().fg(Color::LightYellow),
-            ));
+            spans.push(Span::styled(line_no, Style::default().fg(Color::LightYellow)));
             spans.push(Span::styled("│ ", Style::default().fg(Color::LightBlue)));
             if self.is_css {
-                if let Some(swatch) = css_swatch(line) {
+                if let Some(swatch) = css_swatch(&self.lines[idx]) {
                     spans.push(swatch);
                     spans.push(Span::raw(" "));
                 } else {
                     spans.push(Span::raw("   "));
                 }
             }
-            if let Some(ref mut hl) = highlighter {
-                let line_with_newline = format!("{}\n", line);
-                let regions = hl.highlight_line(&line_with_newline, &self.syntax_set).unwrap_or_default();
-                spans.extend(regions.into_iter().map(|(style, part)| syntect_span(style, part)));
-            } else {
-                spans.push(Span::styled(line.clone(), Style::default().fg(Color::White)));
-            }
+            spans.extend(self.content_spans(idx));
             output.push(Line::from(spans));
         }
         output
@@ -344,6 +346,46 @@ impl SyntaxEngine {
         frame.render_widget(Paragraph::new(lines).block(block), area);
     }
 
+    /// Build the syntect span cache once (only when highlighting is enabled).
+    /// This replaces re-highlighting the scrolled-off prefix on every frame.
+    fn ensure_highlight_cache(&mut self) {
+        if !self.highlight_enabled || !self.highlight_cache.is_empty() {
+            return;
+        }
+        let syntax = self
+            .syntax
+            .as_ref()
+            .and_then(|name| self.syntax_set.find_syntax_by_name(name));
+        let mut highlighter = match syntax {
+            Some(syn) => HighlightLines::new(syn, &self.theme),
+            None => return,
+        };
+        let mut cache = Vec::with_capacity(self.lines.len());
+        for line in &self.lines {
+            let line_with_newline = format!("{}\n", line);
+            let regions = highlighter
+                .highlight_line(&line_with_newline, &self.syntax_set)
+                .unwrap_or_default();
+            cache.push(
+                regions
+                    .into_iter()
+                    .map(|(style, part)| syntect_span(style, part))
+                    .collect::<Vec<_>>(),
+            );
+        }
+        self.highlight_cache = cache;
+    }
+
+    /// Content spans for a source line: cached syntect spans, or a plain span.
+    fn content_spans(&self, idx: usize) -> Vec<Span<'static>> {
+        if self.highlight_enabled {
+            if let Some(spans) = self.highlight_cache.get(idx) {
+                return spans.clone();
+            }
+        }
+        vec![Span::styled(self.lines[idx].clone(), Style::default().fg(Color::White))]
+    }
+
     fn render_code(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         if self.selection < self.scroll {
             self.scroll = self.selection;
@@ -356,26 +398,14 @@ impl SyntaxEngine {
             return;
         }
 
-        let syntax = self
-            .syntax
-            .as_ref()
-            .and_then(|name| self.syntax_set.find_syntax_by_name(name));
-        let mut highlighter = syntax
-            .map(|syn| HighlightLines::new(syn, &self.theme));
+        self.ensure_highlight_cache();
 
         let mut output = Vec::new();
         let line_no_width = self.lines.len().max(1).to_string().len().max(2);
-        for (idx, line) in self.lines.iter().enumerate() {
-            let line_with_newline = format!("{}\n", line);
-            if idx < self.scroll {
-                if let Some(ref mut hl) = highlighter {
-                    let _ = hl.highlight_line(&line_with_newline, &self.syntax_set);
-                }
-                continue;
-            }
-            if idx >= self.scroll + area.height as usize {
-                break;
-            }
+        let start = self.scroll;
+        let end = (self.scroll + area.height as usize).min(self.lines.len());
+        for idx in start..end {
+            let line = &self.lines[idx];
             let mut spans = Vec::new();
             let line_no = format!("{:>width$} ", idx + 1, width = line_no_width);
             let in_visual = self.visual_range.map_or(false, |(start, end)| {
@@ -400,12 +430,7 @@ impl SyntaxEngine {
                 }
             }
 
-            if let Some(ref mut hl) = highlighter {
-                let regions = hl.highlight_line(&line_with_newline, &self.syntax_set).unwrap_or_default();
-                spans.extend(regions.into_iter().map(|(style, part)| syntect_span(style, part)));
-            } else {
-                spans.push(Span::raw(line.clone()));
-            }
+            spans.extend(self.content_spans(idx));
 
             let mut line_widget = Line::from(spans);
             let mut style = Style::default();
