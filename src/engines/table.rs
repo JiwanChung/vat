@@ -101,7 +101,9 @@ impl TableEngine {
         if self.schema_view {
             self.df.schema().len()
         } else {
-            self.df.height() + 1
+            // Rows are selectable data rows only; the header is a sticky,
+            // non-selectable line, matching `selection`'s 0..height range.
+            self.df.height()
         }
     }
 
@@ -370,26 +372,31 @@ impl TableEngine {
         None
     }
 
-    /// Get the content of the currently selected row
+    /// Get the content of the currently selected row. `selection` is a data-row
+    /// index (`0..df.height()`), matching navigation and rendering — the sticky
+    /// header is not a selectable row.
     pub fn get_selected_line(&self) -> Option<String> {
         if self.schema_view {
             self.df.schema().iter_fields().nth(self.selection).map(|f| {
                 format!("{}: {}", f.name(), f.data_type())
             })
-        } else if self.selection == 0 {
-            // Header row
-            Some(self.df.get_column_names().join("\t"))
         } else {
-            let row_idx = self.selection.saturating_sub(1);
-            if row_idx < self.df.height() {
-                let values: Vec<String> = self.df.get_columns().iter().map(|col| {
-                    col.get(row_idx).map(|v| format!("{}", v)).unwrap_or_default()
-                }).collect();
-                Some(values.join("\t"))
-            } else {
-                None
-            }
+            self.row_values(self.selection)
         }
+    }
+
+    /// Join one data row's cell values with tabs, or `None` if out of range.
+    fn row_values(&self, row_idx: usize) -> Option<String> {
+        if row_idx >= self.df.height() {
+            return None;
+        }
+        let values: Vec<String> = self
+            .df
+            .get_columns()
+            .iter()
+            .map(|col| col.get(row_idx).map(|v| format!("{}", v)).unwrap_or_default())
+            .collect();
+        Some(values.join("\t"))
     }
 
     /// Get rows in a range (inclusive), joined by newlines
@@ -404,18 +411,8 @@ impl TableEngine {
             .filter_map(|idx| {
                 if self.schema_view {
                     self.df.schema().iter_fields().nth(idx).map(|f| format!("{}: {}", f.name(), f.data_type()))
-                } else if idx == 0 {
-                    Some(self.df.get_column_names().join("\t"))
                 } else {
-                    let row_idx = idx.saturating_sub(1);
-                    if row_idx < self.df.height() {
-                        let values: Vec<String> = self.df.get_columns().iter().map(|col| {
-                            col.get(row_idx).map(|v| format!("{}", v)).unwrap_or_default()
-                        }).collect();
-                        Some(values.join("\t"))
-                    } else {
-                        None
-                    }
+                    self.row_values(idx)
                 }
             })
             .collect();
@@ -762,6 +759,29 @@ mod tests {
         let df = DataFrame::new(vec![s1]).unwrap();
         let widths = compute_col_widths(&df, 30);
         assert_eq!(widths[0], 30);
+    }
+
+    #[test]
+    fn selected_row_is_data_not_header() {
+        use std::io::Write;
+        let mut f = tempfile::Builder::new().suffix(".csv").tempfile().unwrap();
+        writeln!(f, "id,name").unwrap();
+        writeln!(f, "1,alice").unwrap();
+        writeln!(f, "2,bob").unwrap();
+        f.flush().unwrap();
+        let mut engine = TableEngine::from_path(f.path()).unwrap();
+
+        // selection 0 == first data row (not the header); previously returned "id\tname".
+        engine.selection = 0;
+        let first = engine.get_selected_line().unwrap();
+        assert!(first.starts_with("1\t") && first.contains("alice"), "got: {first}");
+        engine.selection = 1;
+        let second = engine.get_selected_line().unwrap();
+        assert!(second.starts_with("2\t") && second.contains("bob"), "got: {second}");
+        // Visual range 0..=1 copies both data rows, no header line.
+        let range = engine.get_lines_range(0, 1).unwrap();
+        assert!(!range.contains("name"), "range must not include header: {range}");
+        assert_eq!(range.lines().count(), 2, "got: {range}");
     }
 
     #[test]

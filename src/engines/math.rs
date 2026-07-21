@@ -13,16 +13,47 @@
 /// `latex_to_unicode` treats it exactly as a backslash.
 pub const PROTECTED_BACKSLASH: char = '\u{E004}';
 
+/// Inside a math region, markdown-active characters must be hidden from comrak
+/// (otherwise `$a*b*c$` becomes emphasis, splitting the span). Each is mapped to
+/// a private-use sentinel during preprocessing and restored here. Returns the
+/// sentinel for a character that needs protecting, or `None` to copy it as-is.
+pub fn protect_markdown_char(c: char) -> Option<char> {
+    Some(match c {
+        '\\' => PROTECTED_BACKSLASH,
+        '*' => '\u{E005}',
+        '_' => '\u{E006}',
+        '`' => '\u{E007}',
+        '[' => '\u{E008}',
+        ']' => '\u{E009}',
+        '<' => '\u{E00A}',
+        '~' => '\u{E00B}',
+        _ => return None,
+    })
+}
+
+/// Inverse of [`protect_markdown_char`]: map a sentinel back to its character,
+/// or return the character unchanged when it is not a protection sentinel.
+pub fn restore_protected(c: char) -> char {
+    match c {
+        '\u{E004}' => '\\',
+        '\u{E005}' => '*',
+        '\u{E006}' => '_',
+        '\u{E007}' => '`',
+        '\u{E008}' => '[',
+        '\u{E009}' => ']',
+        '\u{E00A}' => '<',
+        '\u{E00B}' => '~',
+        other => other,
+    }
+}
+
 /// Convert a LaTeX math expression into a Unicode approximation.
 ///
 /// The result may contain `\n` where the source had a `\\` line break; callers
 /// that render onto a single line should replace those with spaces.
 pub fn latex_to_unicode(src: &str) -> String {
     let mut parser = MathParser {
-        chars: src
-            .chars()
-            .map(|c| if c == PROTECTED_BACKSLASH { '\\' } else { c })
-            .collect(),
+        chars: src.chars().map(restore_protected).collect(),
         pos: 0,
     };
     parser.parse(false)

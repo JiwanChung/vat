@@ -305,18 +305,25 @@ impl LogEngine {
         None
     }
 
-    /// Get the content of the currently selected line
+    /// Get the content of the currently selected line. `selection` is a
+    /// display index into the (possibly level-filtered) visible entries.
     pub fn get_selected_line(&self) -> Option<String> {
-        self.entries.get(self.selection).map(|(_, entry)| entry.raw.clone())
+        let visible = self.visible_entries();
+        let actual = *visible.get(self.selection)?;
+        self.entries.get(actual).map(|(_, entry)| entry.raw.clone())
     }
 
     /// Get lines in a range (inclusive), joined by newlines
     pub fn get_lines_range(&self, start: usize, end: usize) -> Option<String> {
         let (start, end) = if start <= end { (start, end) } else { (end, start) };
-        let total = self.entries.len();
+        let visible = self.visible_entries();
+        let total = visible.len();
         if start >= total { return None; }
         let end = end.min(total.saturating_sub(1));
-        let lines: Vec<String> = self.entries[start..=end].iter().map(|(_, entry)| entry.raw.clone()).collect();
+        let lines: Vec<String> = visible[start..=end]
+            .iter()
+            .filter_map(|&actual| self.entries.get(actual).map(|(_, e)| e.raw.clone()))
+            .collect();
         if lines.is_empty() { None } else { Some(lines.join("\n")) }
     }
 

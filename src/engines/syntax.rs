@@ -1176,14 +1176,15 @@ fn emit_math(out: &mut String, open: char, inner: &[char], close: char) {
     out.push(close);
 }
 
-/// Copy math content, replacing each backslash with the protected sentinel so
-/// comrak cannot strip escapes such as `\,`, `\;`, `\{` inside the equation.
+/// Copy math content, replacing markdown-active characters (`\`, `*`, `_`, `` ` ``,
+/// `[`, `]`, `<`, `~`) with protected sentinels so comrak neither strips escapes
+/// (`\,`) nor reinterprets the content as emphasis/code/links. The sentinels are
+/// restored by `latex_to_unicode`.
 fn copy_protected(inner: &[char], out: &mut String) {
     for &c in inner {
-        if c == '\\' {
-            out.push(crate::engines::math::PROTECTED_BACKSLASH);
-        } else {
-            out.push(c);
+        match crate::engines::math::protect_markdown_char(c) {
+            Some(sentinel) => out.push(sentinel),
+            None => out.push(c),
         }
     }
 }
@@ -1316,15 +1317,24 @@ fn push_text_with_inline_math(spans: &mut Vec<Span<'static>>, text: &str, base_s
     while i < chars.len() {
         let c = chars[i];
         if let Some(close_marker) = math_close_marker(c) {
-            if let Some(close) = chars[i + 1..].iter().position(|&ch| ch == close_marker) {
-                let end = i + 1 + close;
-                flush(&mut buf, spans);
-                push_math_span(spans, &chars[i + 1..end]);
-                i = end + 1;
-                continue;
+            let end = chars[i + 1..]
+                .iter()
+                .position(|&ch| ch == close_marker)
+                .map(|p| i + 1 + p);
+            flush(&mut buf, spans);
+            match end {
+                Some(end) => {
+                    push_math_span(spans, &chars[i + 1..end]);
+                    i = end + 1;
+                }
+                None => {
+                    // Unterminated math (e.g. a `$$` block with no closer): render
+                    // the remainder as math best-effort rather than leaking the
+                    // sentinel or dropping the equation.
+                    push_math_span(spans, &chars[i + 1..]);
+                    i = chars.len();
+                }
             }
-            // Unmatched open sentinel: drop the invisible marker.
-            i += 1;
             continue;
         }
         if c == MATH_INLINE_CLOSE || c == MATH_DISPLAY_CLOSE {
@@ -1332,17 +1342,31 @@ fn push_text_with_inline_math(spans: &mut Vec<Span<'static>>, text: &str, base_s
             i += 1;
             continue;
         }
-        buf.push(c);
+        // Restore any protected sentinel that leaked out of a math region so no
+        // private-use character ever reaches the screen (worst case: raw LaTeX).
+        buf.push(crate::engines::math::restore_protected(c));
         i += 1;
     }
     flush(&mut buf, spans);
 }
 
-/// Render a slice of LaTeX source as a single inline math span.
+/// Render a slice of LaTeX source as a single inline math span. Any stray
+/// delimiter sentinels are stripped so they can never render as glyphs.
 fn push_math_span(spans: &mut Vec<Span<'static>>, latex: &[char]) {
-    let latex: String = latex.iter().collect();
+    let latex: String = latex
+        .iter()
+        .filter(|&&c| !is_math_delimiter_sentinel(c))
+        .collect();
     let rendered = crate::engines::math::latex_to_unicode(latex.trim()).replace('\n', " ");
     spans.push(Span::styled(rendered, math_style()));
+}
+
+/// True for the four delimiter sentinels (open/close, inline/display).
+fn is_math_delimiter_sentinel(c: char) -> bool {
+    matches!(
+        c,
+        MATH_INLINE_OPEN | MATH_INLINE_CLOSE | MATH_DISPLAY_OPEN | MATH_DISPLAY_CLOSE
+    )
 }
 
 /// Map an opening math sentinel to the closing one it expects.
@@ -1612,6 +1636,48 @@ mod tests {
     fn backslash_punctuation_in_paren_delimiters_survive() {
         let out = rendered_text("Euler: \\( e^{i\\pi} \\; \\{x\\} \\).");
         assert!(out.contains("{x}"), "got: {out}");
+    }
+
+    fn assert_no_sentinels(out: &str) {
+        for c in out.chars() {
+            assert!(
+                !('\u{E000}'..='\u{E00F}').contains(&c),
+                "sentinel U+{:04X} leaked: {out}",
+                c as u32
+            );
+        }
+    }
+
+    #[test]
+    fn inline_math_with_markdown_active_chars() {
+        // `*` inside math must not be parsed as emphasis, and nothing leaks.
+        let out = rendered_text("Inline: $\\gamma*x*\\delta$ done.");
+        assert!(out.contains("γ*x*δ"), "got: {out}");
+        assert!(!out.contains('$'), "delimiters should be consumed: {out}");
+        assert_no_sentinels(&out);
+    }
+
+    #[test]
+    fn inline_math_with_underscores_and_brackets() {
+        let out = rendered_text("Range $a_1 + \\sqrt[3]{x}$ ok.");
+        assert!(out.contains("a₁"), "got: {out}");
+        assert!(out.contains("³√x"), "got: {out}");
+        assert_no_sentinels(&out);
+    }
+
+    #[test]
+    fn unterminated_display_math_does_not_leak() {
+        // A `$$` block with no closer must never leak private-use sentinels.
+        let out = rendered_text("Broken:\n\n$$\n\\alpha + \\beta\n");
+        assert_no_sentinels(&out);
+        // The backslashes are restored (honest raw source), not turned into boxes.
+        assert!(out.contains("alpha") || out.contains('α'), "got: {out}");
+    }
+
+    #[test]
+    fn unterminated_inline_math_does_not_leak() {
+        let out = rendered_text("Oops $\\alpha + x here");
+        assert_no_sentinels(&out);
     }
 
     #[test]

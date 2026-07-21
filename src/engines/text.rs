@@ -347,7 +347,9 @@ impl TextEngine {
             return;
         }
         let lower = trimmed.to_lowercase();
-        let total = self.line_count().max(1);
+        // Search in display space so the match lands on the highlighted line even
+        // when a filter is active (`selection` is a display index).
+        let total = self.display_count().max(1);
         let start = if forward {
             (self.selection + 1) % total
         } else {
@@ -355,15 +357,17 @@ impl TextEngine {
         };
 
         for offset in 0..total {
-            let idx = if forward {
+            let disp = if forward {
                 (start + offset) % total
             } else {
                 (start + total - offset % total) % total
             };
-            if let Some(line) = self.get_line(idx) {
-                if line.to_lowercase().contains(&lower) {
-                    self.selection = idx;
-                    break;
+            if let Some(actual) = self.display_to_actual(disp) {
+                if let Some(line) = self.get_line(actual) {
+                    if line.to_lowercase().contains(&lower) {
+                        self.selection = disp;
+                        break;
+                    }
                 }
             }
         }

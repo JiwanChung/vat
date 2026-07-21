@@ -175,31 +175,39 @@ impl JsonlEngine {
             self.scroll = self.selection.saturating_sub(height - 1);
         }
 
-        let total_lines = self.line_count();
-        let line_no_width = total_lines.max(1).to_string().len().max(2);
+        let total_lines = self.display_count();
+        let line_no_width = self.line_count().max(1).to_string().len().max(2);
 
         let mut visible_lines: Vec<Line> = Vec::new();
-        let mut line_idx = 0;
+        let mut disp_idx = 0;
 
-        // Build visible content, accounting for expanded lines
-        while visible_lines.len() < height && line_idx < total_lines {
-            if line_idx < self.scroll {
-                line_idx += 1;
+        // Build visible content, accounting for expanded lines. Iteration is in
+        // display space; each index maps to an actual line for content/numbering.
+        while visible_lines.len() < height && disp_idx < total_lines {
+            if disp_idx < self.scroll {
+                disp_idx += 1;
                 continue;
             }
 
-            if let Some(content) = self.get_line(line_idx) {
+            let actual_idx = match self.display_to_actual(disp_idx) {
+                Some(a) => a,
+                None => {
+                    disp_idx += 1;
+                    continue;
+                }
+            };
+            if let Some(content) = self.get_line(actual_idx) {
                 let (preview, is_valid) = self.parse_line_preview(content);
-                let selected = line_idx == self.selection;
+                let selected = disp_idx == self.selection;
                 let in_visual = self.visual_range.map_or(false, |(start, end)| {
                     let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
-                    line_idx >= lo && line_idx <= hi
+                    disp_idx >= lo && disp_idx <= hi
                 });
-                let is_expanded = self.expanded.contains(&line_idx);
+                let is_expanded = self.expanded.contains(&actual_idx);
 
                 // Main line
                 let mut spans = Vec::new();
-                let line_no = format!("{:>width$} ", line_idx + 1, width = line_no_width);
+                let line_no = format!("{:>width$} ", actual_idx + 1, width = line_no_width);
                 let line_no_style = if selected {
                     Style::default().fg(Color::Black).bg(Color::LightBlue).bold()
                 } else if in_visual {
@@ -260,7 +268,7 @@ impl JsonlEngine {
                     }
                 }
             }
-            line_idx += 1;
+            disp_idx += 1;
         }
 
         let visible_lines = if wrap { super::wrap_lines(visible_lines, area.width as usize) } else { visible_lines };
@@ -284,7 +292,9 @@ impl JsonlEngine {
             }
         }
 
-        let total = self.line_count();
+        // `selection` is a display-space index (0..display_count); under an
+        // active filter it maps to an actual line via `display_to_actual`.
+        let total = self.display_count();
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
                 if self.selection + 1 < total {
@@ -308,11 +318,14 @@ impl JsonlEngine {
                 }
             }
             KeyCode::Enter => {
-                // Toggle expand/collapse
-                if self.expanded.contains(&self.selection) {
-                    self.expanded.remove(&self.selection);
-                } else {
-                    self.expanded.insert(self.selection);
+                // Toggle expand/collapse, keyed by the actual line index so the
+                // state survives filter changes.
+                if let Some(actual) = self.display_to_actual(self.selection) {
+                    if self.expanded.contains(&actual) {
+                        self.expanded.remove(&actual);
+                    } else {
+                        self.expanded.insert(actual);
+                    }
                 }
             }
             KeyCode::Char('n') => {
@@ -341,7 +354,9 @@ impl JsonlEngine {
 
     fn search_next(&mut self, query: &str, forward: bool) {
         let lower = query.to_lowercase();
-        let total = self.line_count().max(1);
+        // Search in display space so the match lands on the highlighted line even
+        // under an active filter.
+        let total = self.display_count().max(1);
         let start = if forward {
             (self.selection + 1) % total
         } else {
@@ -349,15 +364,17 @@ impl JsonlEngine {
         };
 
         for offset in 0..total {
-            let idx = if forward {
+            let disp = if forward {
                 (start + offset) % total
             } else {
                 (start + total - offset % total) % total
             };
-            if let Some(line) = self.get_line(idx) {
-                if line.to_lowercase().contains(&lower) {
-                    self.selection = idx;
-                    break;
+            if let Some(actual) = self.display_to_actual(disp) {
+                if let Some(line) = self.get_line(actual) {
+                    if line.to_lowercase().contains(&lower) {
+                        self.selection = disp;
+                        break;
+                    }
                 }
             }
         }
@@ -365,7 +382,10 @@ impl JsonlEngine {
     }
 
     pub fn breadcrumbs(&self) -> String {
-        format!("{} line {}/{}", self.file_name, self.selection + 1, self.line_count())
+        let line_no = self
+            .display_to_actual(self.selection)
+            .map_or(self.selection + 1, |a| a + 1);
+        format!("{} line {}/{}", self.file_name, line_no, self.display_count())
     }
 
     pub fn status_line(&self) -> String {

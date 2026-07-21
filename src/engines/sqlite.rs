@@ -441,15 +441,10 @@ impl SqliteEngine {
                 }
                 None
             }
-            ViewMode::Preview => {
-                if self.selection == 0 {
-                    self.tables.get(self.current_table).map(|t| {
-                        t.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\t")
-                    })
-                } else {
-                    self.preview_rows.get(self.selection.saturating_sub(1)).map(|row| row.join("\t"))
-                }
-            }
+            ViewMode::Preview => self
+                .preview_rows
+                .get(self.selection)
+                .map(|row| row.join("\t")),
         }
     }
 
@@ -477,11 +472,7 @@ impl SqliteEngine {
                         None
                     }
                     ViewMode::Preview => {
-                        if idx == 0 {
-                            self.tables.get(self.current_table).map(|t| t.columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join("\t"))
-                        } else {
-                            self.preview_rows.get(idx.saturating_sub(1)).map(|row| row.join("\t"))
-                        }
+                        self.preview_rows.get(idx).map(|row| row.join("\t"))
                     }
                 }
             })
@@ -497,7 +488,9 @@ impl SqliteEngine {
     pub fn content_height(&self) -> usize {
         match self.view_mode {
             ViewMode::Schema => self.tables.iter().map(|t| t.columns.len() + 2).sum(),
-            ViewMode::Preview => self.preview_rows.len() + 1,
+            // Data rows only; the column header is a sticky, non-selectable row,
+            // matching `selection`'s 0..preview_rows.len() range.
+            ViewMode::Preview => self.preview_rows.len(),
         }
     }
 
