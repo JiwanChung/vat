@@ -52,6 +52,9 @@ pub struct App {
     wrap: bool,
     /// Accumulated numeric count prefix (e.g. `10j`, `25G`).
     pending_count: Option<usize>,
+    /// Match count for the current search query, recomputed per keystroke (not
+    /// per frame). `None` when the engine can't count or no query is active.
+    search_match_count: Option<usize>,
     /// One clipboard handle for the process lifetime. Kept alive so copied text
     /// remains available to paste while vat is running (on X11 the selection is
     /// served by the owning process). `None` if the platform clipboard is
@@ -88,7 +91,22 @@ impl App {
             wrap: false,
             clipboard: Clipboard::new().ok(),
             pending_count: None,
+            search_match_count: None,
         }
+    }
+
+    /// Apply the search query incrementally as the user types (search mode only,
+    /// not filter/goto). Empty query is a no-op.
+    fn live_search(&mut self) {
+        if self.input.is_filter || self.input.is_goto {
+            return;
+        }
+        if self.input.buffer.is_empty() {
+            self.search_match_count = None;
+            return;
+        }
+        self.engine.apply_search(&self.input.buffer);
+        self.search_match_count = self.engine.match_count(&self.input.buffer);
     }
 
     /// Jump to a 1-based line number by going to the top and stepping down.
@@ -267,6 +285,7 @@ impl App {
                 }
                 KeyCode::Backspace => {
                     self.input.buffer.pop();
+                    self.live_search();
                 }
                 KeyCode::Char(c) => {
                     if key.modifiers.contains(KeyModifiers::CONTROL) {
@@ -275,10 +294,12 @@ impl App {
                             self.input.buffer.clear();
                         } else if c == 'u' {
                             self.input.buffer.clear();
+                            self.live_search();
                         }
                         return;
                     }
                     self.input.buffer.push(c);
+                    self.live_search();
                 }
                 _ => {}
             }
@@ -482,6 +503,17 @@ impl App {
                     "▌",
                     Style::default()
                         .fg(ratatui::style::Color::LightCyan),
+                ),
+                Span::styled(
+                    if !self.input.is_goto && !self.input.is_filter {
+                        match self.search_match_count {
+                            Some(n) => format!("  {} match{}", n, if n == 1 { "" } else { "es" }),
+                            None => String::new(),
+                        }
+                    } else {
+                        String::new()
+                    },
+                    Style::default().fg(ratatui::style::Color::DarkGray),
                 ),
             ]);
             let hint = Line::from(vec![
@@ -918,6 +950,20 @@ mod tests {
             app.handle_key(key(c));
         }
         assert_eq!(app.engine.selection(), 10, "gg then 10j should select line 11");
+    }
+
+    #[test]
+    fn incremental_search_and_match_count() {
+        let mut app = app_with_lines(100); // lines "line 1".."line 100"
+        app.handle_key(key('/'));
+        assert!(app.input.active && !app.input.is_filter && !app.input.is_goto);
+        for c in "line 100".chars() {
+            app.handle_key(key(c));
+        }
+        // Only "line 100" contains "line 100".
+        assert_eq!(app.search_match_count, Some(1));
+        // Incremental: selection jumped to the match (line 100 -> index 99).
+        assert_eq!(app.engine.selection(), 99);
     }
 
     #[test]

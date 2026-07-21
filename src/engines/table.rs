@@ -385,6 +385,20 @@ impl TableEngine {
         }
     }
 
+    /// Count data rows where any cell matches the query.
+    pub fn count_matches(&self, m: &crate::search::Matcher) -> usize {
+        (0..self.df.height())
+            .filter(|&idx| {
+                self.df.get_columns().iter().any(|series| {
+                    series
+                        .get(idx)
+                        .map(|v| m.is_match(&v.to_string()))
+                        .unwrap_or(false)
+                })
+            })
+            .count()
+    }
+
     /// Join one data row's cell values with tabs, or `None` if out of range.
     fn row_values(&self, row_idx: usize) -> Option<String> {
         if row_idx >= self.df.height() {

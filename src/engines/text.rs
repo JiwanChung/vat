@@ -89,6 +89,14 @@ impl TextEngine {
         self.line_offsets.len()
     }
 
+    /// Count lines matching the query (over the whole file).
+    pub fn count_matches(&self, m: &crate::search::Matcher) -> usize {
+        (0..self.line_count())
+            .filter_map(|i| self.get_line(i))
+            .filter(|l| m.is_match(l))
+            .count()
+    }
+
     /// Number of lines to display (filtered or all)
     fn display_count(&self) -> usize {
         self.filtered_indices.as_ref().map_or(self.line_count(), |f| f.len())

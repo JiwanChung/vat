@@ -150,6 +150,18 @@ impl SyntaxEngine {
         }
     }
 
+    /// Count lines matching the query (rendered markdown lines, or source lines).
+    pub fn count_matches(&self, m: &crate::search::Matcher) -> usize {
+        if self.is_markdown {
+            self.md_rendered
+                .iter()
+                .filter(|md| m.is_match(&md_line_text(md)))
+                .count()
+        } else {
+            self.lines.iter().filter(|l| m.is_match(l)).count()
+        }
+    }
+
     pub fn render_plain_lines(&mut self) -> Vec<Line<'static>> {
         if self.is_markdown {
             return render_markdown_with_gutter(&self.md_rendered, None);

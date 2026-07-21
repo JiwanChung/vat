@@ -336,6 +336,11 @@ impl LogEngine {
         self.visible_entries().len()
     }
 
+    /// Count log entries whose raw text matches the query.
+    pub fn count_matches(&self, m: &crate::search::Matcher) -> usize {
+        self.entries.iter().filter(|(_, e)| m.is_match(&e.raw)).count()
+    }
+
     pub fn render_plain_lines(&self, _width: u16) -> Vec<Line<'static>> {
         let line_no_width = self.entries.len().max(1).to_string().len().max(2);
         self.entries

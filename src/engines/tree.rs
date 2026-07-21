@@ -686,6 +686,15 @@ fn page_jump(view_height: usize) -> usize {
 }
 
 impl TreeEngine {
+    /// Count flattened nodes whose label or value matches the query.
+    pub fn count_matches(&mut self, m: &crate::search::Matcher) -> usize {
+        self.rebuild_flat();
+        self.flat
+            .iter()
+            .filter(|f| m.is_match(&f.label) || m.is_match(&f.value_preview))
+            .count()
+    }
+
     pub fn search_next(&mut self, query: &str, forward: bool) {
         let trimmed = query.trim();
         if trimmed.is_empty() {

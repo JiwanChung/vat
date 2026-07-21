@@ -92,6 +92,14 @@ impl JsonlEngine {
         self.filtered_indices.as_ref().map_or(self.line_count(), |f| f.len())
     }
 
+    /// Count lines matching the query (over the whole file).
+    pub fn count_matches(&self, m: &crate::search::Matcher) -> usize {
+        (0..self.line_count())
+            .filter_map(|i| self.get_line(i))
+            .filter(|l| m.is_match(l))
+            .count()
+    }
+
     fn display_to_actual(&self, display_idx: usize) -> Option<usize> {
         match &self.filtered_indices {
             Some(indices) => indices.get(display_idx).copied(),

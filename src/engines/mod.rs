@@ -468,6 +468,21 @@ impl EngineState {
         }
     }
 
+    /// Number of lines/rows/entries matching `query`, when the engine can count
+    /// cheaply. `None` for engines where a total is not meaningful.
+    pub fn match_count(&mut self, query: &str) -> Option<usize> {
+        let m = crate::search::Matcher::new(query);
+        match self {
+            EngineState::Text(engine) => Some(engine.count_matches(&m)),
+            EngineState::Syntax(engine) => Some(engine.count_matches(&m)),
+            EngineState::Jsonl(engine) => Some(engine.count_matches(&m)),
+            EngineState::Log(engine) => Some(engine.count_matches(&m)),
+            EngineState::Tree(engine) => Some(engine.count_matches(&m)),
+            EngineState::Table(engine) => Some(engine.count_matches(&m)),
+            _ => None,
+        }
+    }
+
     pub fn render_plain_lines(&mut self, width: u16) -> Vec<Line<'static>> {
         match self {
             EngineState::Tree(engine) => engine.render_plain_lines(),
