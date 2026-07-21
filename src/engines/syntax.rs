@@ -120,6 +120,44 @@ impl SyntaxEngine {
         })
     }
 
+    /// Build a Markdown-rendering engine directly from a Markdown string (used by
+    /// engines that synthesize Markdown, e.g. Jupyter notebooks).
+    pub fn from_markdown(file_name: String, content: &str) -> Self {
+        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+        let syntax_set = SyntaxSet::load_defaults_newlines();
+        let theme_set = ThemeSet::load_defaults();
+        let theme = theme_set
+            .themes
+            .get("Monokai Extended")
+            .or_else(|| theme_set.themes.get("base16-eighties.dark"))
+            .or_else(|| theme_set.themes.get("base16-ocean.dark"))
+            .unwrap_or_else(|| theme_set.themes.values().next().expect("theme"))
+            .clone();
+        let md_rendered = render_markdown(content);
+        Self {
+            lines,
+            selection: 0,
+            scroll: 0,
+            file_name,
+            syntax_set,
+            syntax: None,
+            theme,
+            components: Vec::new(),
+            show_sidebar: false,
+            last_query: None,
+            is_css: false,
+            is_markdown: true,
+            highlight_enabled: false,
+            highlight_cache: Vec::new(),
+            md_rendered,
+            syntax_error_lines: HashSet::new(),
+            pending_g: false,
+            last_view_height: 0,
+            last_match: None,
+            visual_range: None,
+        }
+    }
+
     pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         self.last_view_height = area.height as usize;
         let chunks = if self.show_sidebar {

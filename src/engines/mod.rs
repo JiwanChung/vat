@@ -75,6 +75,7 @@ mod log;
 mod logic;
 mod makefile;
 mod math;
+pub(crate) mod notebook;
 mod sqlite;
 mod syntax;
 mod table;

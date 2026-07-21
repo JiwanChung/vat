@@ -26,6 +26,16 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
         return JsonlEngine::from_path(path).map(EngineState::Jsonl);
     }
 
+    // Jupyter notebooks: render cells as Markdown (code fences + outputs).
+    if ext == "ipynb" {
+        if let Ok(md) = crate::engines::notebook::to_markdown(path) {
+            return Ok(EngineState::Syntax(SyntaxEngine::from_markdown(
+                file_name.to_string(),
+                &md,
+            )));
+        }
+    }
+
     // Structured data formats - uses mmap + size checking
     if matches!(ext.as_str(), "json" | "yaml" | "yml" | "toml" | "kdl") {
         return TreeEngine::from_path(path).map(EngineState::Tree);
