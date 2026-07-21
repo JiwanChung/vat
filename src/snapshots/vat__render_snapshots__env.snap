@@ -1,0 +1,68 @@
+---
+source: src/render_snapshots.rs
+expression: "render(\"examples/sample.env\")"
+---
+#  │  Category  Key  Value
+8  │  General  APP_NAME  acme-platform
+9  │  Config  APP_ENV  development
+10  │  API/Network  APP_PORT  8080
+11  │  General  APP_WORKERS  4
+12  │  Config  APP_LOG_LEVEL  debug
+13  │  Config  APP_LOG_FORMAT  pretty
+14  │  Auth/Secret  APP_SECRET_KEY  ••••••••
+17  │  Database  DATABASE_URL  postgres://acme:localdev@localhost:5432/acme_dev
+18  │  Database  DATABASE_POOL_MIN  2
+19  │  Database  DATABASE_POOL_MAX  10
+20  │  Database  DATABASE_IDLE_TIMEOUT  300
+21  │  Database  DATABASE_STATEMENT_TIMEOUT  30000
+22  │  Database  DATABASE_SSL_MODE  prefer
+26  │  Database  REDIS_URL  redis://localhost:6379/0
+27  │  Database  REDIS_SENTINEL_URLS
+28  │  Database  REDIS_SENTINEL_MASTER
+29  │  Database  REDIS_PASSWORD  ••••••••
+30  │  Database  REDIS_POOL_SIZE  5
+31  │  Database  REDIS_TTL_DEFAULT  3600
+32  │  Database  REDIS_KEY_PREFIX  ••••••••
+35  │  General  KAFKA_BROKERS  localhost:9092
+36  │  General  KAFKA_GROUP_ID  acme-api-dev
+37  │  General  KAFKA_AUTO_OFFSET_RESET  earliest
+38  │  General  KAFKA_SECURITY_PROTOCOL  PLAINTEXT
+44  │  General  JWT_ALGORITHM  RS256
+45  │  General  JWT_ISSUER  https://auth.acme.dev
+46  │  General  JWT_AUDIENCE  https://api.acme.dev
+47  │  Auth/Secret  JWT_ACCESS_TOKEN_TTL  ••••••••
+48  │  Auth/Secret  JWT_REFRESH_TOKEN_TTL  ••••••••
+53  │  General  PAYMENT_PROVIDER  stripe
+54  │  API/Network  STRIPE_API_KEY  ••••••••
+55  │  Auth/Secret  STRIPE_WEBHOOK_SECRET  ••••••••
+56  │  API/Network  STRIPE_API_VERSION  2024-11-20
+58  │  General  SHIPPING_PROVIDER  shippo
+59  │  API/Network  SHIPPO_API_KEY  ••••••••
+61  │  Email  EMAIL_PROVIDER  resend
+62  │  API/Network  RESEND_API_KEY  ••••••••
+63  │  Email  EMAIL_FROM  noreply@acme.dev
+64  │  Email  EMAIL_REPLY_TO  support@acme.dev
+67  │  API/Network  S3_ENDPOINT  http://localhost:9000
+68  │  Cloud  S3_REGION  us-east-1
+69  │  Cloud  S3_BUCKET  acme-uploads-dev
+70  │  Auth/Secret  S3_ACCESS_KEY  ••••••••
+71  │  Auth/Secret  S3_SECRET_KEY  ••••••••
+72  │  Cloud  S3_FORCE_PATH_STYLE  true
+75  │  General  OTEL_ENABLED  true
+76  │  API/Network  OTEL_EXPORTER_OTLP_ENDPOINT  http://localhost:4317
+77  │  General  OTEL_SERVICE_NAME  acme-api
+78  │  General  OTEL_TRACES_SAMPLER  parentbased_traceidratio
+79  │  General  OTEL_TRACES_SAMPLER_ARG  0.1
+81  │  General  PROMETHEUS_ENABLED  true
+82  │  API/Network  PROMETHEUS_PORT  9102
+84  │  General  SENTRY_DSN
+85  │  Config  SENTRY_ENVIRONMENT  development
+86  │  General  SENTRY_TRACES_SAMPLE_RATE  0.1
+89  │  General  FEATURE_FLAGS_PROVIDER  local
+95  │  General  RATE_LIMIT_ENABLED  true
+96  │  General  RATE_LIMIT_REQUESTS_PER_MINUTE  100
+97  │  General  RATE_LIMIT_BURST  20
+98  │  General  RATE_LIMIT_BY  ip
+101  │  General  CORS_ALLOWED_ORIGINS  http://localhost:3000,http://localhost:5173
+102  │  General  CORS_ALLOWED_METHODS  GET,POST,PUT,PATCH,DELETE,OPTIONS
+103  │  General  CORS_MAX_AGE  86400

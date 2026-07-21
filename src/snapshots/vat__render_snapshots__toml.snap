@@ -1,0 +1,197 @@
+---
+source: src/render_snapshots.rs
+expression: "render(\"examples/sample.toml\")"
+---
+  1 │ ▾ root: {...}
+  2 │   ▾ bench: [...]
+  3 │     ▾ [0]: {...}
+  4 │         harness: false
+  5 │         name: "order_processing"
+  6 │     ▾ [1]: {...}
+  7 │         harness: false
+  8 │         name: "serialization"
+  9 │   ▾ bin: [...]
+ 10 │     ▾ [0]: {...}
+ 11 │         name: "acme"
+ 12 │         path: "crates/cli/src/main.rs"
+ 13 │     ▾ [1]: {...}
+ 14 │         name: "acme-worker"
+ 15 │         path: "crates/worker/src/main.rs"
+ 16 │   ▾ dependencies: {...}
+ 17 │     ▾ acme-api: {...}
+ 18 │         path: "crates/api"
+ 19 │     ▾ acme-core: {...}
+ 20 │         path: "crates/core"
+ 21 │     ▾ clap: {...}
+ 22 │       ▾ features: [...]
+ 23 │           [0]: "derive"
+ 24 │           [1]: "env"
+ 25 │         version: "4"
+ 26 │     ▾ dotenvy: {...}
+ 27 │         workspace: true
+ 28 │     ▾ tokio: {...}
+ 29 │         workspace: true
+ 30 │     ▾ tracing: {...}
+ 31 │         workspace: true
+ 32 │     ▾ tracing-subscriber: {...}
+ 33 │         workspace: true
+ 34 │   ▾ dev-dependencies: {...}
+ 35 │     ▾ criterion: {...}
+ 36 │       ▾ features: [...]
+ 37 │           [0]: "html_reports"
+ 38 │           [1]: "async_tokio"
+ 39 │         version: "0.5"
+ 40 │       proptest: "1"
+ 41 │     ▾ testcontainers: {...}
+ 42 │       ▾ features: [...]
+ 43 │           [0]: "postgres"
+ 44 │           [1]: "redis"
+ 45 │         version: "0.15"
+ 46 │       wiremock: "0.6"
+ 47 │   ▾ package: {...}
+ 48 │       default-run: "acme"
+ 49 │       description: "CLI tool for the ACME platform"
+ 50 │     ▾ edition: {...}
+ 51 │         workspace: true
+ 52 │       name: "acme-cli"
+ 53 │     ▾ version: {...}
+ 54 │         workspace: true
+ 55 │   ▾ profile: {...}
+ 56 │     ▾ dev: {...}
+ 57 │         debug: true
+ 58 │         incremental: true
+ 59 │         opt-level: 0
+ 60 │         split-debuginfo: "unpacked"
+ 61 │     ▾ release: {...}
+ 62 │         codegen-units: 1
+ 63 │         lto: "thin"
+ 64 │         opt-level: 3
+ 65 │         panic: "abort"
+ 66 │         strip: "symbols"
+ 67 │     ▾ release-debug: {...}
+ 68 │         debug: true
+ 69 │         inherits: "release"
+ 70 │         strip: "none"
+ 71 │   ▾ workspace: {...}
+ 72 │     ▾ default-members: [...]
+ 73 │         [0]: "crates/cli"
+ 74 │     ▾ dependencies: {...}
+ 75 │         anyhow: "1"
+ 76 │         argon2: "0.5"
+ 77 │       ▾ axum: {...}
+ 78 │         ▾ features: [...]
+ 79 │             [0]: "macros"
+ 80 │             [1]: "ws"
+ 81 │           version: "0.7"
+ 82 │       ▾ axum-extra: {...}
+ 83 │         ▾ features: [...]
+ 84 │             [0]: "typed-header"
+ 85 │             [1]: "cookie"
+ 86 │           version: "0.9"
+ 87 │       ▾ chrono: {...}
+ 88 │         ▾ features: [...]
+ 89 │             [0]: "serde"
+ 90 │           version: "0.4"
+ 91 │         dotenvy: "0.15"
+ 92 │       ▾ hyper: {...}
+ 93 │         ▾ features: [...]
+ 94 │             [0]: "full"
+ 95 │           version: "1.0"
+ 96 │         jsonwebtoken: "9"
+ 97 │         metrics: "0.22"
+ 98 │         metrics-exporter-prometheus: "0.14"
+ 99 │       ▾ opentelemetry: {...}
+100 │         ▾ features: [...]
+101 │             [0]: "metrics"
+102 │             [1]: "trace"
+103 │           version: "0.22"
+104 │       ▾ opentelemetry-otlp: {...}
+105 │         ▾ features: [...]
+106 │             [0]: "tonic"
+107 │           version: "0.15"
+108 │         rand: "0.8"
+109 │       ▾ redis: {...}
+110 │         ▾ features: [...]
+111 │             [0]: "tokio-comp"
+112 │             [1]: "connection-manager"
+113 │           version: "0.25"
+114 │         regex: "1"
+115 │       ▾ serde: {...}
+116 │         ▾ features: [...]
+117 │             [0]: "derive"
+118 │           version: "1"
+119 │         serde_json: "1"
+120 │       ▾ sqlx: {...}
+121 │         ▾ features: [...]
+122 │             [0]: "runtime-tokio-rustls"
+123 │             [1]: "postgres"
+124 │             [2]: "uuid"
+125 │             [3]: "chrono"
+126 │             [4]: "json"
+127 │             [5]: "migrate"
+128 │           version: "0.7"
+129 │         thiserror: "1"
+130 │       ▾ tokio: {...}
+131 │         ▾ features: [...]
+132 │             [0]: "full"
+133 │           version: "1.36"
+134 │         tokio-stream: "0.1"
+135 │         toml: "0.8"
+136 │       ▾ tower: {...}
+137 │         ▾ features: [...]
+138 │             [0]: "full"
+139 │           version: "0.4"
+140 │       ▾ tower-http: {...}
+141 │         ▾ features: [...]
+142 │             [0]: "cors"
+143 │             [1]: "trace"
+144 │             [2]: "compression-gzip"
+145 │             [3]: "request-id"
+146 │           version: "0.5"
+147 │         tracing: "0.1"
+148 │       ▾ tracing-subscriber: {...}
+149 │         ▾ features: [...]
+150 │             [0]: "env-filter"
+151 │             [1]: "json"
+152 │           version: "0.3"
+153 │       ▾ url: {...}
+154 │         ▾ features: [...]
+155 │             [0]: "serde"
+156 │           version: "2"
+157 │       ▾ uuid: {...}
+158 │         ▾ features: [...]
+159 │             [0]: "v4"
+160 │             [1]: "v7"
+161 │             [2]: "serde"
+162 │           version: "1"
+163 │     ▾ lints: {...}
+164 │       ▾ clippy: {...}
+165 │           dbg_macro: "warn"
+166 │           expect_used: "warn"
+167 │         ▾ nursery: {...}
+168 │             level: "warn"
+169 │             priority: -1
+170 │         ▾ pedantic: {...}
+171 │             level: "warn"
+172 │             priority: -1
+173 │           todo: "warn"
+174 │           unwrap_used: "deny"
+175 │       ▾ rust: {...}
+176 │           unsafe_code: "forbid"
+177 │           unused_must_use: "deny"
+178 │     ▾ members: [...]
+179 │         [0]: "crates/core"
+180 │         [1]: "crates/api"
+181 │         [2]: "crates/worker"
+182 │         [3]: "crates/cli"
+183 │         [4]: "crates/migrations"
+184 │     ▾ package: {...}
+185 │       ▾ authors: [...]
+186 │           [0]: "ACME Platform Team <platform@acme.dev>"
+187 │         edition: "2021"
+188 │         homepage: "https://acme.dev"
+189 │         license: "MIT OR Apache-2.0"
+190 │         repository: "https://github.com/acme/platform"
+191 │         rust-version: "1.75"
+192 │         version: "0.14.2"
+193 │       resolver: "2"

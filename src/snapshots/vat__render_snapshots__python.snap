@@ -1,0 +1,536 @@
+---
+source: src/render_snapshots.rs
+expression: "render(\"examples/sample.py\")"
+---
+  1 │ """
+  2 │ Data pipeline for processing clickstream events.
+  3 │
+  4 │ Reads from Kafka, transforms events, computes session-level aggregates,
+  5 │ and writes results to both PostgreSQL and a Parquet data lake.
+  6 │ """
+  7 │
+  8 │ from __future__ import annotations
+  9 │
+ 10 │ import asyncio
+ 11 │ import hashlib
+ 12 │ import logging
+ 13 │ import signal
+ 14 │ import sys
+ 15 │ from collections import defaultdict
+ 16 │ from dataclasses import dataclass, field
+ 17 │ from datetime import datetime, timedelta, timezone
+ 18 │ from enum import Enum, auto
+ 19 │ from pathlib import Path
+ 20 │ from typing import AsyncIterator, Protocol, Self
+ 21 │
+ 22 │ import asyncpg
+ 23 │ import orjson
+ 24 │ import pyarrow as pa
+ 25 │ import pyarrow.parquet as pq
+ 26 │ from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
+ 27 │ from prometheus_client import Counter, Histogram, start_http_server
+ 28 │
+ 29 │ logger = logging.getLogger(__name__)
+ 30 │
+ 31 │ # --- Metrics ---
+ 32 │
+ 33 │ EVENTS_PROCESSED = Counter(
+ 34 │     "pipeline_events_processed_total",
+ 35 │     "Total number of events processed",
+ 36 │     ["event_type", "status"],
+ 37 │ )
+ 38 │ PROCESSING_LATENCY = Histogram(
+ 39 │     "pipeline_processing_seconds",
+ 40 │     "Event processing latency in seconds",
+ 41 │     buckets=[0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1.0, 5.0],
+ 42 │ )
+ 43 │ BATCH_SIZE = Histogram(
+ 44 │     "pipeline_batch_size",
+ 45 │     "Number of events per batch flush",
+ 46 │     buckets=[1, 10, 50, 100, 500, 1000],
+ 47 │ )
+ 48 │
+ 49 │
+ 50 │ # --- Domain Models ---
+ 51 │
+ 52 │
+ 53 │ class EventType(Enum):
+ 54 │     PAGE_VIEW = auto()
+ 55 │     CLICK = auto()
+ 56 │     FORM_SUBMIT = auto()
+ 57 │     PURCHASE = auto()
+ 58 │     ERROR = auto()
+ 59 │     CUSTOM = auto()
+ 60 │
+ 61 │     @classmethod
+ 62 │     def from_string(cls, value: str) -> Self:
+ 63 │         mapping = {
+ 64 │             "page_view": cls.PAGE_VIEW,
+ 65 │             "click": cls.CLICK,
+ 66 │             "form_submit": cls.FORM_SUBMIT,
+ 67 │             "purchase": cls.PURCHASE,
+ 68 │             "error": cls.ERROR,
+ 69 │         }
+ 70 │         return mapping.get(value.lower(), cls.CUSTOM)
+ 71 │
+ 72 │
+ 73 │ @dataclass(frozen=True, slots=True)
+ 74 │ class RawEvent:
+ 75 │     event_id: str
+ 76 │     user_id: str
+ 77 │     session_id: str
+ 78 │     event_type: str
+ 79 │     timestamp: datetime
+ 80 │     page_url: str
+ 81 │     referrer: str | None = None
+ 82 │     properties: dict = field(default_factory=dict)
+ 83 │     user_agent: str = ""
+ 84 │     ip_hash: str = ""
+ 85 │
+ 86 │     @classmethod
+ 87 │     def from_kafka(cls, message: bytes) -> Self:
+ 88 │         data = orjson.loads(message)
+ 89 │         return cls(
+ 90 │             event_id=data["event_id"],
+ 91 │             user_id=data["user_id"],
+ 92 │             session_id=data["session_id"],
+ 93 │             event_type=data["event_type"],
+ 94 │             timestamp=datetime.fromisoformat(data["timestamp"]),
+ 95 │             page_url=data["page_url"],
+ 96 │             referrer=data.get("referrer"),
+ 97 │             properties=data.get("properties", {}),
+ 98 │             user_agent=data.get("user_agent", ""),
+ 99 │             ip_hash=hashlib.sha256(
+100 │                 data.get("ip", "unknown").encode()
+101 │             ).hexdigest()[:16],
+102 │         )
+103 │
+104 │
+105 │ @dataclass
+106 │ class SessionAggregate:
+107 │     session_id: str
+108 │     user_id: str
+109 │     started_at: datetime
+110 │     last_activity: datetime
+111 │     page_views: int = 0
+112 │     clicks: int = 0
+113 │     purchases: int = 0
+114 │     errors: int = 0
+115 │     total_events: int = 0
+116 │     pages_visited: set[str] = field(default_factory=set)
+117 │     total_revenue_cents: int = 0
+118 │     is_bounced: bool = True
+119 │
+120 │     @property
+121 │     def duration(self) -> timedelta:
+122 │         return self.last_activity - self.started_at
+123 │
+124 │     @property
+125 │     def is_converted(self) -> bool:
+126 │         return self.purchases > 0
+127 │
+128 │     def update(self, event: RawEvent) -> None:
+129 │         self.total_events += 1
+130 │         self.last_activity = max(self.last_activity, event.timestamp)
+131 │
+132 │         event_type = EventType.from_string(event.event_type)
+133 │         match event_type:
+134 │             case EventType.PAGE_VIEW:
+135 │                 self.page_views += 1
+136 │                 self.pages_visited.add(event.page_url)
+137 │                 if self.page_views > 1:
+138 │                     self.is_bounced = False
+139 │             case EventType.CLICK:
+140 │                 self.clicks += 1
+141 │                 self.is_bounced = False
+142 │             case EventType.PURCHASE:
+143 │                 self.purchases += 1
+144 │                 self.total_revenue_cents += event.properties.get("amount_cents", 0)
+145 │                 self.is_bounced = False
+146 │             case EventType.ERROR:
+147 │                 self.errors += 1
+148 │             case _:
+149 │                 pass
+150 │
+151 │
+152 │ # --- Sink Protocols ---
+153 │
+154 │
+155 │ class EventSink(Protocol):
+156 │     async def write_batch(self, events: list[RawEvent]) -> None: ...
+157 │     async def flush_sessions(self, sessions: list[SessionAggregate]) -> None: ...
+158 │     async def close(self) -> None: ...
+159 │
+160 │
+161 │ # --- PostgreSQL Sink ---
+162 │
+163 │
+164 │ class PostgresSink:
+165 │     def __init__(self, dsn: str, *, batch_size: int = 500):
+166 │         self._dsn = dsn
+167 │         self._batch_size = batch_size
+168 │         self._pool: asyncpg.Pool | None = None
+169 │
+170 │     async def connect(self) -> None:
+171 │         self._pool = await asyncpg.create_pool(
+172 │             self._dsn, min_size=2, max_size=10, command_timeout=30
+173 │         )
+174 │         await self._ensure_tables()
+175 │
+176 │     async def _ensure_tables(self) -> None:
+177 │         assert self._pool is not None
+178 │         async with self._pool.acquire() as conn:
+179 │             await conn.execute("""
+180 │                 CREATE TABLE IF NOT EXISTS events (
+181 │                     event_id    TEXT PRIMARY KEY,
+182 │                     user_id     TEXT NOT NULL,
+183 │                     session_id  TEXT NOT NULL,
+184 │                     event_type  TEXT NOT NULL,
+185 │                     timestamp   TIMESTAMPTZ NOT NULL,
+186 │                     page_url    TEXT NOT NULL,
+187 │                     referrer    TEXT,
+188 │                     properties  JSONB DEFAULT '{}',
+189 │                     ip_hash     TEXT,
+190 │                     created_at  TIMESTAMPTZ DEFAULT NOW()
+191 │                 );
+192 │                 CREATE INDEX IF NOT EXISTS idx_events_session
+193 │                     ON events (session_id, timestamp);
+194 │                 CREATE INDEX IF NOT EXISTS idx_events_user_ts
+195 │                     ON events (user_id, timestamp DESC);
+196 │
+197 │                 CREATE TABLE IF NOT EXISTS sessions (
+198 │                     session_id          TEXT PRIMARY KEY,
+199 │                     user_id             TEXT NOT NULL,
+200 │                     started_at          TIMESTAMPTZ NOT NULL,
+201 │                     ended_at            TIMESTAMPTZ NOT NULL,
+202 │                     duration_seconds    INTEGER NOT NULL,
+203 │                     page_views          INTEGER DEFAULT 0,
+204 │                     clicks              INTEGER DEFAULT 0,
+205 │                     purchases           INTEGER DEFAULT 0,
+206 │                     errors              INTEGER DEFAULT 0,
+207 │                     total_events        INTEGER DEFAULT 0,
+208 │                     pages_visited       TEXT[] DEFAULT '{}',
+209 │                     revenue_cents       INTEGER DEFAULT 0,
+210 │                     is_bounced          BOOLEAN DEFAULT TRUE,
+211 │                     is_converted        BOOLEAN DEFAULT FALSE,
+212 │                     updated_at          TIMESTAMPTZ DEFAULT NOW()
+213 │                 );
+214 │                 CREATE INDEX IF NOT EXISTS idx_sessions_user
+215 │                     ON sessions (user_id, started_at DESC);
+216 │             """)
+217 │
+218 │     async def write_batch(self, events: list[RawEvent]) -> None:
+219 │         if not events or self._pool is None:
+220 │             return
+221 │
+222 │         async with self._pool.acquire() as conn:
+223 │             await conn.executemany(
+224 │                 """
+225 │                 INSERT INTO events (event_id, user_id, session_id, event_type,
+226 │                                     timestamp, page_url, referrer, properties, ip_hash)
+227 │                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+228 │                 ON CONFLICT (event_id) DO NOTHING
+229 │                 """,
+230 │                 [
+231 │                     (
+232 │                         e.event_id, e.user_id, e.session_id, e.event_type,
+233 │                         e.timestamp, e.page_url, e.referrer,
+234 │                         orjson.dumps(e.properties).decode(), e.ip_hash,
+235 │                     )
+236 │                     for e in events
+237 │                 ],
+238 │             )
+239 │
+240 │     async def flush_sessions(self, sessions: list[SessionAggregate]) -> None:
+241 │         if not sessions or self._pool is None:
+242 │             return
+243 │
+244 │         async with self._pool.acquire() as conn:
+245 │             await conn.executemany(
+246 │                 """
+247 │                 INSERT INTO sessions (session_id, user_id, started_at, ended_at,
+248 │                     duration_seconds, page_views, clicks, purchases, errors,
+249 │                     total_events, pages_visited, revenue_cents, is_bounced, is_converted)
+250 │                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+251 │                 ON CONFLICT (session_id) DO UPDATE SET
+252 │                     ended_at = EXCLUDED.ended_at,
+253 │                     duration_seconds = EXCLUDED.duration_seconds,
+254 │                     page_views = EXCLUDED.page_views,
+255 │                     clicks = EXCLUDED.clicks,
+256 │                     purchases = EXCLUDED.purchases,
+257 │                     errors = EXCLUDED.errors,
+258 │                     total_events = EXCLUDED.total_events,
+259 │                     pages_visited = EXCLUDED.pages_visited,
+260 │                     revenue_cents = EXCLUDED.revenue_cents,
+261 │                     is_bounced = EXCLUDED.is_bounced,
+262 │                     is_converted = EXCLUDED.is_converted,
+263 │                     updated_at = NOW()
+264 │                 """,
+265 │                 [
+266 │                     (
+267 │                         s.session_id, s.user_id, s.started_at, s.last_activity,
+268 │                         int(s.duration.total_seconds()), s.page_views, s.clicks,
+269 │                         s.purchases, s.errors, s.total_events,
+270 │                         list(s.pages_visited), s.total_revenue_cents,
+271 │                         s.is_bounced, s.is_converted,
+272 │                     )
+273 │                     for s in sessions
+274 │                 ],
+275 │             )
+276 │
+277 │     async def close(self) -> None:
+278 │         if self._pool:
+279 │             await self._pool.close()
+280 │
+281 │
+282 │ # --- Parquet / Data Lake Sink ---
+283 │
+284 │
+285 │ class ParquetSink:
+286 │     SCHEMA = pa.schema([
+287 │         ("event_id", pa.string()),
+288 │         ("user_id", pa.string()),
+289 │         ("session_id", pa.string()),
+290 │         ("event_type", pa.string()),
+291 │         ("timestamp", pa.timestamp("us", tz="UTC")),
+292 │         ("page_url", pa.string()),
+293 │         ("referrer", pa.string()),
+294 │         ("ip_hash", pa.string()),
+295 │     ])
+296 │
+297 │     def __init__(self, base_path: Path, *, partition_by: str = "date"):
+298 │         self._base_path = base_path
+299 │         self._partition_by = partition_by
+300 │         self._buffer: list[dict] = []
+301 │
+302 │     async def write_batch(self, events: list[RawEvent]) -> None:
+303 │         for event in events:
+304 │             self._buffer.append({
+305 │                 "event_id": event.event_id,
+306 │                 "user_id": event.user_id,
+307 │                 "session_id": event.session_id,
+308 │                 "event_type": event.event_type,
+309 │                 "timestamp": event.timestamp,
+310 │                 "page_url": event.page_url,
+311 │                 "referrer": event.referrer,
+312 │                 "ip_hash": event.ip_hash,
+313 │             })
+314 │
+315 │         if len(self._buffer) >= 10_000:
+316 │             await self._flush_to_parquet()
+317 │
+318 │     async def _flush_to_parquet(self) -> None:
+319 │         if not self._buffer:
+320 │             return
+321 │
+322 │         table = pa.Table.from_pylist(self._buffer, schema=self.SCHEMA)
+323 │
+324 │         # Partition by date for efficient querying
+325 │         dates = defaultdict(list)
+326 │         for row in self._buffer:
+327 │             date_str = row["timestamp"].strftime("%Y-%m-%d")
+328 │             dates[date_str].append(row)
+329 │
+330 │         for date_str, rows in dates.items():
+331 │             partition_table = pa.Table.from_pylist(rows, schema=self.SCHEMA)
+332 │             output_dir = self._base_path / f"date={date_str}"
+333 │             output_dir.mkdir(parents=True, exist_ok=True)
+334 │
+335 │             timestamp = datetime.now(timezone.utc).strftime("%H%M%S%f")
+336 │             output_path = output_dir / f"events_{timestamp}.parquet"
+337 │
+338 │             pq.write_table(
+339 │                 partition_table,
+340 │                 output_path,
+341 │                 compression="zstd",
+342 │                 row_group_size=50_000,
+343 │             )
+344 │             logger.info("Wrote %d events to %s", len(rows), output_path)
+345 │
+346 │         self._buffer.clear()
+347 │
+348 │     async def flush_sessions(self, sessions: list[SessionAggregate]) -> None:
+349 │         pass  # Sessions are managed in PostgreSQL only
+350 │
+351 │     async def close(self) -> None:
+352 │         await self._flush_to_parquet()
+353 │
+354 │
+355 │ # --- Pipeline ---
+356 │
+357 │
+358 │ class Pipeline:
+359 │     SESSION_TIMEOUT = timedelta(minutes=30)
+360 │
+361 │     def __init__(
+362 │         self,
+363 │         consumer: AIOKafkaConsumer,
+364 │         sinks: list[EventSink],
+365 │         *,
+366 │         batch_interval: float = 5.0,
+367 │         max_batch_size: int = 1000,
+368 │     ):
+369 │         self._consumer = consumer
+370 │         self._sinks = sinks
+371 │         self._batch_interval = batch_interval
+372 │         self._max_batch_size = max_batch_size
+373 │         self._sessions: dict[str, SessionAggregate] = {}
+374 │         self._buffer: list[RawEvent] = []
+375 │         self._running = False
+376 │         self._tasks: list[asyncio.Task] = []
+377 │
+378 │     async def start(self) -> None:
+379 │         self._running = True
+380 │         await self._consumer.start()
+381 │         logger.info("Pipeline started, consuming from Kafka")
+382 │
+383 │         self._tasks = [
+384 │             asyncio.create_task(self._consume_loop(), name="consume"),
+385 │             asyncio.create_task(self._flush_loop(), name="flush"),
+386 │             asyncio.create_task(self._session_gc_loop(), name="session_gc"),
+387 │         ]
+388 │
+389 │         try:
+390 │             await asyncio.gather(*self._tasks)
+391 │         except asyncio.CancelledError:
+392 │             logger.info("Pipeline tasks cancelled, shutting down")
+393 │
+394 │     async def stop(self) -> None:
+395 │         self._running = False
+396 │         for task in self._tasks:
+397 │             task.cancel()
+398 │         await asyncio.gather(*self._tasks, return_exceptions=True)
+399 │
+400 │         # Final flush
+401 │         if self._buffer:
+402 │             await self._flush_batch()
+403 │         await self._flush_sessions(force=True)
+404 │
+405 │         await self._consumer.stop()
+406 │         for sink in self._sinks:
+407 │             await sink.close()
+408 │         logger.info("Pipeline stopped gracefully")
+409 │
+410 │     async def _consume_loop(self) -> None:
+411 │         async for message in self._consumer:
+412 │             if not self._running:
+413 │                 break
+414 │
+415 │             try:
+416 │                 with PROCESSING_LATENCY.time():
+417 │                     event = RawEvent.from_kafka(message.value)
+418 │                     self._buffer.append(event)
+419 │                     self._update_session(event)
+420 │                     EVENTS_PROCESSED.labels(
+421 │                         event_type=event.event_type, status="ok"
+422 │                     ).inc()
+423 │             except Exception:
+424 │                 EVENTS_PROCESSED.labels(
+425 │                     event_type="unknown", status="error"
+426 │                 ).inc()
+427 │                 logger.exception("Failed to process message at offset %d", message.offset)
+428 │
+429 │             if len(self._buffer) >= self._max_batch_size:
+430 │                 await self._flush_batch()
+431 │
+432 │     async def _flush_loop(self) -> None:
+433 │         while self._running:
+434 │             await asyncio.sleep(self._batch_interval)
+435 │             if self._buffer:
+436 │                 await self._flush_batch()
+437 │             await self._flush_sessions()
+438 │
+439 │     async def _session_gc_loop(self) -> None:
+440 │         """Periodically expire stale sessions."""
+441 │         while self._running:
+442 │             await asyncio.sleep(60)
+443 │             now = datetime.now(timezone.utc)
+444 │             expired = [
+445 │                 sid
+446 │                 for sid, session in self._sessions.items()
+447 │                 if now - session.last_activity > self.SESSION_TIMEOUT
+448 │             ]
+449 │             if expired:
+450 │                 sessions_to_flush = [self._sessions.pop(sid) for sid in expired]
+451 │                 for sink in self._sinks:
+452 │                     await sink.flush_sessions(sessions_to_flush)
+453 │                 logger.info("Expired %d stale sessions", len(expired))
+454 │
+455 │     def _update_session(self, event: RawEvent) -> None:
+456 │         session = self._sessions.get(event.session_id)
+457 │         if session is None:
+458 │             session = SessionAggregate(
+459 │                 session_id=event.session_id,
+460 │                 user_id=event.user_id,
+461 │                 started_at=event.timestamp,
+462 │                 last_activity=event.timestamp,
+463 │             )
+464 │             self._sessions[event.session_id] = session
+465 │         session.update(event)
+466 │
+467 │     async def _flush_batch(self) -> None:
+468 │         batch = self._buffer[:]
+469 │         self._buffer.clear()
+470 │         BATCH_SIZE.observe(len(batch))
+471 │         for sink in self._sinks:
+472 │             try:
+473 │                 await sink.write_batch(batch)
+474 │             except Exception:
+475 │                 logger.exception("Sink %s failed to write batch", type(sink).__name__)
+476 │
+477 │     async def _flush_sessions(self, *, force: bool = False) -> None:
+478 │         if force:
+479 │             sessions = list(self._sessions.values())
+480 │         else:
+481 │             now = datetime.now(timezone.utc)
+482 │             sessions = [
+483 │                 s
+484 │                 for s in self._sessions.values()
+485 │                 if now - s.last_activity > timedelta(minutes=5)
+486 │             ]
+487 │
+488 │         if sessions:
+489 │             for sink in self._sinks:
+490 │                 await sink.flush_sessions(sessions)
+491 │
+492 │
+493 │ # --- Entry Point ---
+494 │
+495 │
+496 │ async def main() -> None:
+497 │     logging.basicConfig(
+498 │         level=logging.INFO,
+499 │         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+500 │     )
+501 │
+502 │     # Start Prometheus metrics server
+503 │     start_http_server(9090)
+504 │
+505 │     consumer = AIOKafkaConsumer(
+506 │         "clickstream-events",
+507 │         bootstrap_servers="kafka:9092",
+508 │         group_id="clickstream-pipeline",
+509 │         auto_offset_reset="earliest",
+510 │         enable_auto_commit=False,
+511 │         max_poll_records=500,
+512 │     )
+513 │
+514 │     pg_sink = PostgresSink("postgresql://app:secret@postgres:5432/analytics")
+515 │     await pg_sink.connect()
+516 │
+517 │     pq_sink = ParquetSink(Path("/data/lake/clickstream"))
+518 │
+519 │     pipeline = Pipeline(consumer, [pg_sink, pq_sink], batch_interval=5.0)
+520 │
+521 │     loop = asyncio.get_running_loop()
+522 │     for sig in (signal.SIGTERM, signal.SIGINT):
+523 │         loop.add_signal_handler(sig, lambda: asyncio.create_task(pipeline.stop()))
+524 │
+525 │     await pipeline.start()
+526 │
+527 │
+528 │ if __name__ == "__main__":
+529 │     try:
+530 │         asyncio.run(main())
+531 │     except KeyboardInterrupt:
+532 │         sys.exit(0)

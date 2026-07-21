@@ -1,0 +1,257 @@
+---
+source: src/render_snapshots.rs
+expression: "render(\"examples/sample.yaml\")"
+---
+  1 │ ▾ root: [...]
+  2 │   ▾ [0]: {...}
+  3 │       apiVersion: "apps/v1"
+  4 │       kind: "Deployment"
+  5 │     ▾ metadata: {...}
+  6 │       ▾ labels: {...}
+  7 │           app: "order-service"
+  8 │           environment: "production"
+  9 │           tier: "backend"
+ 10 │           version: "v2.8.0"
+ 11 │         name: "order-service"
+ 12 │         namespace: "ecommerce"
+ 13 │     ▾ spec: {...}
+ 14 │         replicas: 5
+ 15 │         revisionHistoryLimit: 10
+ 16 │       ▾ selector: {...}
+ 17 │         ▾ matchLabels: {...}
+ 18 │             app: "order-service"
+ 19 │       ▾ template: {...}
+ 20 │         ▾ metadata: {...}
+ 21 │           ▾ annotations: {...}
+ 22 │               prometheus.io/path: "/metrics"
+ 23 │               prometheus.io/port: "9090"
+ 24 │               prometheus.io/scrape: "true"
+ 25 │           ▾ labels: {...}
+ 26 │               app: "order-service"
+ 27 │               version: "v2.8.0"
+ 28 │         ▾ spec: {...}
+ 29 │           ▾ containers: [...]
+ 30 │             ▾ [0]: {...}
+ 31 │               ▾ env: [...]
+ 32 │                 ▾ [0]: {...}
+ 33 │                     name: "APP_ENV"
+ 34 │                     value: "production"
+ 35 │                 ▾ [1]: {...}
+ 36 │                     name: "DATABASE_URL"
+ 37 │                   ▾ valueFrom: {...}
+ 38 │                     ▾ secretKeyRef: {...}
+ 39 │                         key: "connection-string"
+ 40 │                         name: "order-db-credentials"
+ 41 │                 ▾ [2]: {...}
+ 42 │                     name: "KAFKA_BROKERS"
+ 43 │                     value: "kafka-0.kafka:9092,kafka-1.kafka:9092,kafka-2.kafka:9092"
+ 44 │                 ▾ [3]: {...}
+ 45 │                     name: "CACHE_REDIS_URL"
+ 46 │                     value: "redis-sentinel://redis-sentinel:26379/0"
+ 47 │                 ▾ [4]: {...}
+ 48 │                     name: "PAYMENT_SERVICE_URL"
+ 49 │                     value: "http://payment-service.ecommerce.svc:8080"
+ 50 │                 ▾ [5]: {...}
+ 51 │                     name: "INVENTORY_SERVICE_URL"
+ 52 │                     value: "http://inventory-service.ecommerce.svc:8080"
+ 53 │                 ▾ [6]: {...}
+ 54 │                     name: "NOTIFICATION_SERVICE_URL"
+ 55 │                     value: "http://notification-service.ecommerce.svc:8080"
+ 56 │                 ▾ [7]: {...}
+ 57 │                     name: "JWT_PUBLIC_KEY"
+ 58 │                   ▾ valueFrom: {...}
+ 59 │                     ▾ secretKeyRef: {...}
+ 60 │                         key: "public.pem"
+ 61 │                         name: "jwt-keys"
+ 62 │                 image: "ghcr.io/acme/order-service:2.8.0"
+ 63 │                 imagePullPolicy: "IfNotPresent"
+ 64 │               ▾ lifecycle: {...}
+ 65 │                 ▾ preStop: {...}
+ 66 │                   ▾ exec: {...}
+ 67 │                     ▾ command: [...]
+ 68 │                         [0]: "/bin/sh"
+ 69 │                         [1]: "-c"
+ 70 │                         [2]: "sleep 15"
+ 71 │               ▾ livenessProbe: {...}
+ 72 │                   failureThreshold: 3
+ 73 │                 ▾ httpGet: {...}
+ 74 │                     path: "/healthz"
+ 75 │                     port: "admin"
+ 76 │                   initialDelaySeconds: 30
+ 77 │                   periodSeconds: 15
+ 78 │                   timeoutSeconds: 5
+ 79 │                 name: "order-api"
+ 80 │               ▾ ports: [...]
+ 81 │                 ▾ [0]: {...}
+ 82 │                     containerPort: 8080
+ 83 │                     name: "http"
+ 84 │                 ▾ [1]: {...}
+ 85 │                     containerPort: 9090
+ 86 │                     name: "grpc"
+ 87 │                 ▾ [2]: {...}
+ 88 │                     containerPort: 9091
+ 89 │                     name: "admin"
+ 90 │               ▾ readinessProbe: {...}
+ 91 │                 ▾ grpc: {...}
+ 92 │                     port: 9090
+ 93 │                   initialDelaySeconds: 10
+ 94 │                   periodSeconds: 5
+ 95 │               ▾ resources: {...}
+ 96 │                 ▾ limits: {...}
+ 97 │                     cpu: "1"
+ 98 │                     ephemeral-storage: "500Mi"
+ 99 │                     memory: "1Gi"
+100 │                 ▾ requests: {...}
+101 │                     cpu: "250m"
+102 │                     ephemeral-storage: "100Mi"
+103 │                     memory: "512Mi"
+104 │               ▾ startupProbe: {...}
+105 │                   failureThreshold: 30
+106 │                 ▾ httpGet: {...}
+107 │                     path: "/startup"
+108 │                     port: "admin"
+109 │                   periodSeconds: 10
+110 │               ▾ volumeMounts: [...]
+111 │                 ▾ [0]: {...}
+112 │                     mountPath: "/etc/order-service"
+113 │                     name: "config"
+114 │                     readOnly: true
+115 │                 ▾ [1]: {...}
+116 │                     mountPath: "/var/cache/orders"
+117 │                     name: "cache"
+118 │             ▾ [1]: {...}
+119 │               ▾ args: [...]
+120 │                   [0]: "-c"
+121 │                   [1]: "/etc/envoy/envoy.yaml"
+122 │                   [2]: "--service-cluster"
+123 │                   [3]: "order-service"
+124 │                 image: "envoyproxy/envoy:v1.28.0"
+125 │                 name: "envoy-sidecar"
+126 │               ▾ ports: [...]
+127 │                 ▾ [0]: {...}
+128 │                     containerPort: 8443
+129 │                     name: "proxy-http"
+130 │                 ▾ [1]: {...}
+131 │                     containerPort: 15000
+132 │                     name: "proxy-admin"
+133 │               ▾ resources: {...}
+134 │                 ▾ limits: {...}
+135 │                     cpu: "200m"
+136 │                     memory: "128Mi"
+137 │                 ▾ requests: {...}
+138 │                     cpu: "50m"
+139 │                     memory: "64Mi"
+140 │           ▾ initContainers: [...]
+141 │             ▾ [0]: {...}
+142 │               ▾ command: [...]
+143 │                   [0]: "./migrate"
+144 │                   [1]: "--source"
+145 │                   [2]: "file:///migrations"
+146 │                   [3]: "--database"
+147 │                   [4]: "$(DATABASE_URL)"
+148 │               ▾ envFrom: [...]
+149 │                 ▾ [0]: {...}
+150 │                   ▾ secretRef: {...}
+151 │                       name: "order-db-credentials"
+152 │                 image: "ghcr.io/acme/order-migrate:2.8.0"
+153 │                 name: "db-migration"
+154 │             serviceAccountName: "order-service-sa"
+155 │             terminationGracePeriodSeconds: 60
+156 │           ▾ topologySpreadConstraints: [...]
+157 │             ▾ [0]: {...}
+158 │               ▾ labelSelector: {...}
+159 │                 ▾ matchLabels: {...}
+160 │                     app: "order-service"
+161 │                 maxSkew: 1
+162 │                 topologyKey: "topology.kubernetes.io/zone"
+163 │                 whenUnsatisfiable: "DoNotSchedule"
+164 │             ▾ [1]: {...}
+165 │               ▾ labelSelector: {...}
+166 │                 ▾ matchLabels: {...}
+167 │                     app: "order-service"
+168 │                 maxSkew: 1
+169 │                 topologyKey: "kubernetes.io/hostname"
+170 │                 whenUnsatisfiable: "ScheduleAnyway"
+171 │           ▾ volumes: [...]
+172 │             ▾ [0]: {...}
+173 │                 name: "config"
+174 │               ▾ projected: {...}
+175 │                 ▾ sources: [...]
+176 │                   ▾ [0]: {...}
+177 │                     ▾ configMap: {...}
+178 │                         name: "order-service-config"
+179 │                   ▾ [1]: {...}
+180 │                     ▾ secret: {...}
+181 │                         name: "order-service-secrets"
+182 │             ▾ [1]: {...}
+183 │               ▾ emptyDir: {...}
+184 │                   medium: "Memory"
+185 │                   sizeLimit: "256Mi"
+186 │                 name: "cache"
+187 │   ▾ [1]: {...}
+188 │       apiVersion: "v1"
+189 │       kind: "Service"
+190 │     ▾ metadata: {...}
+191 │       ▾ labels: {...}
+192 │           app: "order-service"
+193 │         name: "order-service"
+194 │         namespace: "ecommerce"
+195 │     ▾ spec: {...}
+196 │       ▾ ports: [...]
+197 │         ▾ [0]: {...}
+198 │             name: "http"
+199 │             port: 8080
+200 │             protocol: "TCP"
+201 │             targetPort: "http"
+202 │         ▾ [1]: {...}
+203 │             name: "grpc"
+204 │             port: 9090
+205 │             protocol: "TCP"
+206 │             targetPort: "grpc"
+207 │       ▾ selector: {...}
+208 │           app: "order-service"
+209 │         type: "ClusterIP"
+210 │   ▾ [2]: {...}
+211 │       apiVersion: "autoscaling/v2"
+212 │       kind: "HorizontalPodAutoscaler"
+213 │     ▾ metadata: {...}
+214 │         name: "order-service-hpa"
+215 │         namespace: "ecommerce"
+216 │     ▾ spec: {...}
+217 │       ▾ behavior: {...}
+218 │         ▾ scaleDown: {...}
+219 │           ▾ policies: [...]
+220 │             ▾ [0]: {...}
+221 │                 periodSeconds: 60
+222 │                 type: "Pods"
+223 │                 value: 2
+224 │             stabilizationWindowSeconds: 300
+225 │         ▾ scaleUp: {...}
+226 │           ▾ policies: [...]
+227 │             ▾ [0]: {...}
+228 │                 periodSeconds: 60
+229 │                 type: "Percent"
+230 │                 value: 50
+231 │             stabilizationWindowSeconds: 30
+232 │         maxReplicas: 20
+233 │       ▾ metrics: [...]
+234 │         ▾ [0]: {...}
+235 │           ▾ resource: {...}
+236 │               name: "cpu"
+237 │             ▾ target: {...}
+238 │                 averageUtilization: 70
+239 │                 type: "Utilization"
+240 │             type: "Resource"
+241 │         ▾ [1]: {...}
+242 │           ▾ pods: {...}
+243 │             ▾ metric: {...}
+244 │                 name: "http_requests_per_second"
+245 │             ▾ target: {...}
+246 │                 averageValue: "1000"
+247 │                 type: "AverageValue"
+248 │             type: "Pods"
+249 │         minReplicas: 3
+250 │       ▾ scaleTargetRef: {...}
+251 │           apiVersion: "apps/v1"
+252 │           kind: "Deployment"
+253 │           name: "order-service"

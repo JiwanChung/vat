@@ -1,0 +1,207 @@
+---
+source: src/render_snapshots.rs
+expression: "render(\"examples/sample.json\")"
+---
+  1 │ ▾ root: {...}
+  2 │     apiVersion: "v2"
+  3 │     kind: "Application"
+  4 │   ▾ metadata: {...}
+  5 │     ▾ annotations: {...}
+  6 │         deployment.kubernetes.io/revision: "47"
+  7 │         kubectl.kubernetes.io/last-applied-configuration: "{...truncated...}"
+  8 │     ▾ labels: {...}
+  9 │         app.kubernetes.io/managed-by: "helm"
+ 10 │         app.kubernetes.io/name: "acme-platform"
+ 11 │         app.kubernetes.io/version: "3.14.1"
+ 12 │         team: "platform-engineering"
+ 13 │       name: "acme-platform"
+ 14 │       namespace: "production"
+ 15 │   ▾ monitoring: {...}
+ 16 │     ▾ alerts: [...]
+ 17 │       ▾ [0]: {...}
+ 18 │           expr: "rate(http_requests_total{status=~'5..'}[5m]) > 0.05"
+ 19 │           for: "5m"
+ 20 │           name: "HighErrorRate"
+ 21 │           severity: "critical"
+ 22 │       ▾ [1]: {...}
+ 23 │           expr: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2"
+ 24 │           for: "10m"
+ 25 │           name: "HighLatency"
+ 26 │           severity: "warning"
+ 27 │       ▾ [2]: {...}
+ 28 │           expr: "rate(kube_pod_container_status_restarts_total[15m]) > 0"
+ 29 │           for: "1h"
+ 30 │           name: "PodCrashLooping"
+ 31 │           severity: "critical"
+ 32 │       ▾ [3]: {...}
+ 33 │           expr: "container_memory_working_set_bytes / container_spec_memory_limit_bytes > 0.9"
+ 34 │           for: "5m"
+ 35 │           name: "MemoryPressure"
+ 36 │           severity: "warning"
+ 37 │     ▾ dashboards: [...]
+ 38 │       ▾ [0]: {...}
+ 39 │           name: "API Overview"
+ 40 │         ▾ panels: [...]
+ 41 │           ▾ [0]: {...}
+ 42 │               query: "rate(http_requests_total{app='acme'}[5m])"
+ 43 │               title: "Request Rate"
+ 44 │               type: "graph"
+ 45 │           ▾ [1]: {...}
+ 46 │               query: "rate(http_requests_total{app='acme',status=~'5..'}[5m])"
+ 47 │               title: "Error Rate"
+ 48 │               type: "graph"
+ 49 │           ▾ [2]: {...}
+ 50 │               query: "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket{app='acme'}[5m]))"
+ 51 │               title: "P99 Latency"
+ 52 │               type: "stat"
+ 53 │           ▾ [3]: {...}
+ 54 │               query: "sum(grpc_server_started_total{app='acme'}) - sum(grpc_server_handled_total{app='acme'})"
+ 55 │               title: "Active Connections"
+ 56 │               type: "gauge"
+ 57 │       ▾ [1]: {...}
+ 58 │           name: "Resource Utilization"
+ 59 │         ▾ panels: [...]
+ 60 │           ▾ [0]: {...}
+ 61 │               query: "rate(container_cpu_usage_seconds_total{pod=~'acme.*'}[5m])"
+ 62 │               title: "CPU Usage"
+ 63 │               type: "graph"
+ 64 │           ▾ [1]: {...}
+ 65 │               query: "container_memory_working_set_bytes{pod=~'acme.*'}"
+ 66 │               title: "Memory Usage"
+ 67 │               type: "graph"
+ 68 │           ▾ [2]: {...}
+ 69 │               query: "rate(container_network_transmit_bytes_total{pod=~'acme.*'}[5m])"
+ 70 │               title: "Network I/O"
+ 71 │               type: "graph"
+ 72 │   ▾ spec: {...}
+ 73 │       replicas: 3
+ 74 │     ▾ strategy: {...}
+ 75 │       ▾ rollingUpdate: {...}
+ 76 │           maxSurge: "25%"
+ 77 │           maxUnavailable: 0
+ 78 │         type: "RollingUpdate"
+ 79 │     ▾ template: {...}
+ 80 │       ▾ affinity: {...}
+ 81 │         ▾ podAntiAffinity: {...}
+ 82 │           ▾ preferredDuringSchedulingIgnoredDuringExecution: [...]
+ 83 │             ▾ [0]: {...}
+ 84 │               ▾ podAffinityTerm: {...}
+ 85 │                 ▾ labelSelector: {...}
+ 86 │                   ▾ matchExpressions: [...]
+ 87 │                     ▾ [0]: {...}
+ 88 │                         key: "app"
+ 89 │                         operator: "In"
+ 90 │                       ▾ values: [...]
+ 91 │                           [0]: "acme-platform"
+ 92 │                   topologyKey: "kubernetes.io/hostname"
+ 93 │                 weight: 100
+ 94 │       ▾ containers: [...]
+ 95 │         ▾ [0]: {...}
+ 96 │           ▾ env: [...]
+ 97 │             ▾ [0]: {...}
+ 98 │                 name: "DATABASE_URL"
+ 99 │               ▾ valueFrom: {...}
+100 │                 ▾ secretKeyRef: {...}
+101 │                     key: "url"
+102 │                     name: "db-credentials"
+103 │             ▾ [1]: {...}
+104 │                 name: "REDIS_HOST"
+105 │                 value: "redis-master.cache.svc.cluster.local"
+106 │             ▾ [2]: {...}
+107 │                 name: "LOG_LEVEL"
+108 │                 value: "info"
+109 │             ▾ [3]: {...}
+110 │                 name: "OTEL_EXPORTER_ENDPOINT"
+111 │                 value: "http://otel-collector:4317"
+112 │             ▾ [4]: {...}
+113 │                 name: "FEATURE_FLAGS_URL"
+114 │                 value: "http://flagsmith:8000/api/v1"
+115 │             image: "ghcr.io/acme/api-server:3.14.1-alpine"
+116 │           ▾ livenessProbe: {...}
+117 │               failureThreshold: 3
+118 │             ▾ httpGet: {...}
+119 │                 path: "/healthz"
+120 │                 port: 8080
+121 │               initialDelaySeconds: 15
+122 │               periodSeconds: 10
+123 │             name: "api-server"
+124 │           ▾ ports: [...]
+125 │             ▾ [0]: {...}
+126 │                 containerPort: 8080
+127 │                 name: "http"
+128 │                 protocol: "TCP"
+129 │             ▾ [1]: {...}
+130 │                 containerPort: 9090
+131 │                 name: "grpc"
+132 │                 protocol: "TCP"
+133 │             ▾ [2]: {...}
+134 │                 containerPort: 9102
+135 │                 name: "metrics"
+136 │                 protocol: "TCP"
+137 │           ▾ readinessProbe: {...}
+138 │             ▾ httpGet: {...}
+139 │                 path: "/readyz"
+140 │                 port: 8080
+141 │               initialDelaySeconds: 5
+142 │               periodSeconds: 5
+143 │           ▾ resources: {...}
+144 │             ▾ limits: {...}
+145 │                 cpu: "2000m"
+146 │                 memory: "2Gi"
+147 │             ▾ requests: {...}
+148 │                 cpu: "500m"
+149 │                 memory: "512Mi"
+150 │           ▾ volumeMounts: [...]
+151 │             ▾ [0]: {...}
+152 │                 mountPath: "/etc/acme"
+153 │                 name: "config"
+154 │                 readOnly: true
+155 │             ▾ [1]: {...}
+156 │                 mountPath: "/etc/tls"
+157 │                 name: "tls-certs"
+158 │                 readOnly: true
+159 │             ▾ [2]: {...}
+160 │                 mountPath: "/tmp"
+161 │                 name: "tmp"
+162 │         ▾ [1]: {...}
+163 │           ▾ args: [...]
+164 │               [0]: "--config-path"
+165 │               [1]: "/etc/envoy/envoy.yaml"
+166 │               [2]: "--log-level"
+167 │               [3]: "warn"
+168 │             image: "envoyproxy/envoy:v1.28-latest"
+169 │             name: "sidecar-proxy"
+170 │           ▾ ports: [...]
+171 │             ▾ [0]: {...}
+172 │                 containerPort: 8443
+173 │                 name: "proxy"
+174 │                 protocol: "TCP"
+175 │           ▾ resources: {...}
+176 │             ▾ limits: {...}
+177 │                 cpu: "500m"
+178 │                 memory: "256Mi"
+179 │             ▾ requests: {...}
+180 │                 cpu: "100m"
+181 │                 memory: "128Mi"
+182 │       ▾ nodeSelector: {...}
+183 │           node.kubernetes.io/instance-type: "m5.xlarge"
+184 │           topology.kubernetes.io/zone: "us-east-1a"
+185 │       ▾ tolerations: [...]
+186 │         ▾ [0]: {...}
+187 │             effect: "NoSchedule"
+188 │             key: "dedicated"
+189 │             operator: "Equal"
+190 │             value: "platform"
+191 │       ▾ volumes: [...]
+192 │         ▾ [0]: {...}
+193 │           ▾ configMap: {...}
+194 │               name: "acme-config"
+195 │             name: "config"
+196 │         ▾ [1]: {...}
+197 │             name: "tls-certs"
+198 │           ▾ secret: {...}
+199 │               secretName: "acme-tls"
+200 │         ▾ [2]: {...}
+201 │           ▾ emptyDir: {...}
+202 │               sizeLimit: "1Gi"
+203 │             name: "tmp"

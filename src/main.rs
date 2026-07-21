@@ -8,6 +8,8 @@ mod analyzer;
 mod app;
 mod engines;
 mod search;
+#[cfg(test)]
+mod render_snapshots;
 
 #[derive(Parser, Debug)]
 #[command(name = "vat", version, about = "Semantic file viewer")]
