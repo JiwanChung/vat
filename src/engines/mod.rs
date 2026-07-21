@@ -15,6 +15,7 @@ mod lock;
 mod log;
 mod logic;
 mod makefile;
+mod math;
 mod sqlite;
 mod syntax;
 mod table;

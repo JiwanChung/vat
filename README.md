@@ -115,7 +115,8 @@ cargo install --path .
 ### Source Code
 | Languages | Features |
 |-----------|----------|
-| Rust, JavaScript, TypeScript, Python, CSS, SQL, Markdown | Syntax highlighting, line numbers |
+| Rust, JavaScript, TypeScript, Python, CSS, SQL | Syntax highlighting, line numbers |
+| Markdown | Styled headers, tables, task lists, and LaTeX math (`$...$` / `\(...\)` inline, `$$...$$` / `\[...\]` display) rendered to Unicode |
 
 ### Binary & Media
 | Format | Extensions | Features |

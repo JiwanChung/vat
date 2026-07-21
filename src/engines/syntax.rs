@@ -654,11 +654,14 @@ fn collect_error_lines(node: tree_sitter::Node, errors: &mut HashSet<usize>) {
 
 fn render_markdown(content: &str) -> Vec<MdLine> {
     use comrak::{parse_document, Arena, ComrakOptions};
+    // Normalise LaTeX `\(...\)` / `\[...\]` delimiters into sentinel markers
+    // before comrak parses (comrak strips the backslash escapes otherwise).
+    let content = normalize_math_delimiters(content);
     let arena = Arena::new();
     let mut options = ComrakOptions::default();
     options.extension.tasklist = true;
     options.extension.table = true;
-    let root = parse_document(&arena, content, &options);
+    let root = parse_document(&arena, &content, &options);
     let mut renderer = MdRenderer::new();
     for node in root.children() {
         renderer.render_block(node, 0, false);
@@ -725,6 +728,24 @@ impl MdRenderer {
                     line: Line::from(spans),
                     source_line: Some(source),
                 });
+                self.blank_line();
+            }
+            NodeValue::Paragraph if paragraph_display_math(node).is_some() => {
+                let math = paragraph_display_math(node).unwrap();
+                self.blank_line();
+                let rendered = crate::engines::math::latex_to_unicode(&math);
+                for text_line in rendered.lines() {
+                    let mut spans = Vec::new();
+                    if in_quote {
+                        spans.push(Span::styled("> ", Style::default().fg(Color::LightCyan)));
+                    }
+                    spans.push(Span::raw(" ".repeat(indent + 4)));
+                    spans.push(Span::styled(text_line.trim_end().to_string(), math_style()));
+                    self.lines.push(MdLine {
+                        line: Line::from(spans),
+                        source_line: Some(source),
+                    });
+                }
                 self.blank_line();
             }
             NodeValue::Paragraph => {
@@ -927,7 +948,7 @@ impl MdRenderer {
         for child in node.children() {
             match &child.data.borrow().value {
                 NodeValue::Text(text) => {
-                    spans.push(Span::styled(text.to_string(), base_style));
+                    push_text_with_inline_math(&mut spans, text, base_style);
                 }
                 NodeValue::Code(code) => {
                     spans.push(Span::styled(
@@ -961,6 +982,401 @@ impl MdRenderer {
         }
         spans
     }
+}
+
+/// Distinct styling for rendered LaTeX math (inline and display).
+fn math_style() -> Style {
+    Style::default().fg(Color::Rgb(0xE6, 0xC0, 0x7B)).italic()
+}
+
+// Private-use sentinels standing in for LaTeX math delimiters after
+// preprocessing. They survive comrak untouched (comrak treats them as ordinary
+// text) whereas the original `$`/`\(`/`\[` delimiters and the backslash escapes
+// inside math do not.
+const MATH_INLINE_OPEN: char = '\u{E000}';
+const MATH_INLINE_CLOSE: char = '\u{E001}';
+const MATH_DISPLAY_OPEN: char = '\u{E002}';
+const MATH_DISPLAY_CLOSE: char = '\u{E003}';
+
+/// Which delimiter opened a multi-line display equation, so we know how it ends.
+#[derive(Clone, Copy)]
+enum DisplayKind {
+    /// Opened with `$$`, closes with `$$`.
+    Dollar,
+    /// Opened with `\[`, closes with `\]`.
+    Bracket,
+}
+
+/// Rewrite every LaTeX math region (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`)
+/// into sentinel-delimited spans before comrak parses the document, and replace
+/// each backslash *inside* math with a protected sentinel so comrak cannot strip
+/// escapes like `\,` or `\{`. `latex_to_unicode` restores those backslashes.
+///
+/// Fenced code blocks and inline code spans are left untouched, so literal
+/// delimiters shown as code (e.g. in a tutorial about LaTeX) survive verbatim.
+/// The `$` currency heuristic lives here so the renderer only ever sees
+/// unambiguous sentinels.
+fn normalize_math_delimiters(content: &str) -> String {
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut fence: Option<(char, usize)> = None;
+    let mut display: Option<DisplayKind> = None;
+    for line in content.split_inclusive('\n') {
+        let (text, newline) = match line.strip_suffix('\n') {
+            Some(t) => (t, "\n"),
+            None => (line, ""),
+        };
+        // Code fences only matter when we are not in the middle of an equation.
+        if display.is_none() {
+            if let Some((fc, run, has_info)) = code_fence(text) {
+                match fence {
+                    None => {
+                        fence = Some((fc, run));
+                        out.push_str(line);
+                        continue;
+                    }
+                    Some((mc, mrun)) if fc == mc && run >= mrun && !has_info => {
+                        fence = None;
+                        out.push_str(line);
+                        continue;
+                    }
+                    _ => {}
+                }
+            }
+            if fence.is_some() {
+                out.push_str(line);
+                continue;
+            }
+        }
+        normalize_math_line(text, &mut display, &mut out);
+        out.push_str(newline);
+    }
+    out
+}
+
+/// Detect a code-fence line, returning `(fence_char, run_length, has_info)`.
+fn code_fence(text: &str) -> Option<(char, usize, bool)> {
+    let trimmed = text.trim_start();
+    let indent = text.len() - trimmed.len();
+    if indent >= 4 {
+        return None; // indented code block, not a fence
+    }
+    let fc = trimmed.chars().next()?;
+    if fc != '`' && fc != '~' {
+        return None;
+    }
+    let run = trimmed.chars().take_while(|&c| c == fc).count();
+    if run < 3 {
+        return None;
+    }
+    let rest: String = trimmed.chars().skip(run).collect();
+    // A backtick fence's info string may not itself contain a backtick.
+    if fc == '`' && rest.contains('`') {
+        return None;
+    }
+    Some((fc, run, !rest.trim().is_empty()))
+}
+
+/// Process one line: detect math regions, emit sentinel-delimited spans with
+/// their backslashes protected, and copy everything else (including inline code
+/// spans) verbatim. `display` carries multi-line display-math state across lines.
+fn normalize_math_line(text: &str, display: &mut Option<DisplayKind>, out: &mut String) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+
+    // Continuation of a multi-line display equation opened on an earlier line.
+    if let Some(kind) = *display {
+        match copy_display_until_close(&chars, i, kind, out) {
+            Some(end) => {
+                *display = None;
+                i = end;
+            }
+            None => return, // whole line is equation body
+        }
+    }
+
+    while i < chars.len() {
+        let c = chars[i];
+        // Inline code span: copy verbatim, math delimiters inside are literal.
+        if c == '`' {
+            i = copy_code_span(&chars, i, out);
+            continue;
+        }
+        // Display math: `$$...$$`.
+        if c == '$' && chars.get(i + 1) == Some(&'$') {
+            match find_seq(&chars, i + 2, '$', '$') {
+                Some(close) => {
+                    emit_math(out, MATH_DISPLAY_OPEN, &chars[i + 2..close], MATH_DISPLAY_CLOSE);
+                    i = close + 2;
+                }
+                None => {
+                    out.push(MATH_DISPLAY_OPEN);
+                    copy_protected(&chars[i + 2..], out);
+                    *display = Some(DisplayKind::Dollar);
+                    return;
+                }
+            }
+            continue;
+        }
+        // Display math: `\[...\]`.
+        if c == '\\' && chars.get(i + 1) == Some(&'[') {
+            match find_backslash_delim(&chars, i + 2, ']') {
+                Some(close) => {
+                    emit_math(out, MATH_DISPLAY_OPEN, &chars[i + 2..close], MATH_DISPLAY_CLOSE);
+                    i = close + 2;
+                }
+                None => {
+                    out.push(MATH_DISPLAY_OPEN);
+                    copy_protected(&chars[i + 2..], out);
+                    *display = Some(DisplayKind::Bracket);
+                    return;
+                }
+            }
+            continue;
+        }
+        // Inline math: `\(...\)`.
+        if c == '\\' && chars.get(i + 1) == Some(&'(') {
+            if let Some(close) = find_backslash_delim(&chars, i + 2, ')') {
+                emit_math(out, MATH_INLINE_OPEN, &chars[i + 2..close], MATH_INLINE_CLOSE);
+                i = close + 2;
+                continue;
+            }
+            // No closer on this line: not valid inline math, emit literally.
+            out.push('\\');
+            out.push('(');
+            i += 2;
+            continue;
+        }
+        // Inline math: `$...$` (currency-safe heuristic).
+        if c == '$' {
+            if let Some(close) = find_dollar_close(&chars, i) {
+                emit_math(out, MATH_INLINE_OPEN, &chars[i + 1..close], MATH_INLINE_CLOSE);
+                i = close + 1;
+                continue;
+            }
+            out.push('$'); // lone `$`: currency or plain text
+            i += 1;
+            continue;
+        }
+        // Any other backslash escape outside math: leave for comrak to handle.
+        if c == '\\' && i + 1 < chars.len() {
+            out.push('\\');
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
+        out.push(c);
+        i += 1;
+    }
+}
+
+/// Emit a sentinel-delimited math span with its inner backslashes protected.
+fn emit_math(out: &mut String, open: char, inner: &[char], close: char) {
+    out.push(open);
+    copy_protected(inner, out);
+    out.push(close);
+}
+
+/// Copy math content, replacing each backslash with the protected sentinel so
+/// comrak cannot strip escapes such as `\,`, `\;`, `\{` inside the equation.
+fn copy_protected(inner: &[char], out: &mut String) {
+    for &c in inner {
+        if c == '\\' {
+            out.push(crate::engines::math::PROTECTED_BACKSLASH);
+        } else {
+            out.push(c);
+        }
+    }
+}
+
+/// Copy an inline code span starting at a backtick run; returns the next index.
+fn copy_code_span(chars: &[char], start: usize, out: &mut String) -> usize {
+    let run = chars[start..].iter().take_while(|&&ch| ch == '`').count();
+    let mut j = start + run;
+    while j < chars.len() {
+        if chars[j] == '`' {
+            let r = chars[j..].iter().take_while(|&&ch| ch == '`').count();
+            if r == run {
+                out.extend(&chars[start..j + run]);
+                return j + run;
+            }
+            j += r;
+        } else {
+            j += 1;
+        }
+    }
+    // Unterminated run: emit the backticks and continue scanning after them.
+    for _ in 0..run {
+        out.push('`');
+    }
+    start + run
+}
+
+/// Continue a multi-line display equation: copy (protected) up to its closer.
+/// Returns `Some(next_index)` past the closer if found on this line, else `None`.
+fn copy_display_until_close(
+    chars: &[char],
+    from: usize,
+    kind: DisplayKind,
+    out: &mut String,
+) -> Option<usize> {
+    let close = match kind {
+        DisplayKind::Dollar => find_seq(chars, from, '$', '$'),
+        DisplayKind::Bracket => find_backslash_delim(chars, from, ']'),
+    };
+    match close {
+        Some(pos) => {
+            copy_protected(&chars[from..pos], out);
+            out.push(MATH_DISPLAY_CLOSE);
+            Some(pos + 2)
+        }
+        None => {
+            copy_protected(&chars[from..], out);
+            None
+        }
+    }
+}
+
+/// Find the next occurrence of the two-character sequence `a``b` from `from`.
+fn find_seq(chars: &[char], from: usize, a: char, b: char) -> Option<usize> {
+    let mut j = from;
+    while j + 1 < chars.len() {
+        if chars[j] == a && chars[j + 1] == b {
+            return Some(j);
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Find a `\<delim>` sequence (e.g. `\)` or `\]`) from `from`, skipping an
+/// escaped `\\` so it is not mistaken for a delimiter. Returns the index of the
+/// backslash.
+fn find_backslash_delim(chars: &[char], from: usize, delim: char) -> Option<usize> {
+    let mut j = from;
+    while j + 1 < chars.len() {
+        if chars[j] == '\\' {
+            if chars[j + 1] == delim {
+                return Some(j);
+            }
+            if chars[j + 1] == '\\' {
+                j += 2; // escaped backslash
+                continue;
+            }
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Given an opening `$` at `open`, return the index of a matching closing `$`
+/// per the pandoc heuristic (so currency like `$2.3M` is not treated as math):
+///   * the opening `$` is immediately followed by a non-space character,
+///   * the closing `$` is immediately preceded by a non-space character,
+///   * the closing `$` is not immediately followed by a digit,
+///   * a `$` may be escaped as `\$`.
+fn find_dollar_close(chars: &[char], open: usize) -> Option<usize> {
+    let after = *chars.get(open + 1)?;
+    if after.is_whitespace() {
+        return None;
+    }
+    let mut j = open + 1;
+    while j < chars.len() {
+        match chars[j] {
+            '\\' => {
+                j += 2; // skip escaped character
+                continue;
+            }
+            '$' => {
+                let prev = chars[j - 1];
+                let next_is_digit = chars.get(j + 1).map_or(false, |c| c.is_ascii_digit());
+                if !prev.is_whitespace() && !next_is_digit {
+                    return Some(j);
+                }
+            }
+            _ => {}
+        }
+        j += 1;
+    }
+    None
+}
+
+/// Split a markdown text run into plain and inline-math segments and push them
+/// as styled spans. By the time text reaches the renderer, all math has already
+/// been rewritten to sentinel-delimited spans by `normalize_math_delimiters`, so
+/// here we only pair the sentinels (`$`/`\(` heuristics live in preprocessing).
+fn push_text_with_inline_math(spans: &mut Vec<Span<'static>>, text: &str, base_style: Style) {
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    let mut buf = String::new();
+    let mut flush = |buf: &mut String, spans: &mut Vec<Span<'static>>| {
+        if !buf.is_empty() {
+            spans.push(Span::styled(std::mem::take(buf), base_style));
+        }
+    };
+    while i < chars.len() {
+        let c = chars[i];
+        if let Some(close_marker) = math_close_marker(c) {
+            if let Some(close) = chars[i + 1..].iter().position(|&ch| ch == close_marker) {
+                let end = i + 1 + close;
+                flush(&mut buf, spans);
+                push_math_span(spans, &chars[i + 1..end]);
+                i = end + 1;
+                continue;
+            }
+            // Unmatched open sentinel: drop the invisible marker.
+            i += 1;
+            continue;
+        }
+        if c == MATH_INLINE_CLOSE || c == MATH_DISPLAY_CLOSE {
+            // Stray closing sentinel with no opener: drop the invisible marker.
+            i += 1;
+            continue;
+        }
+        buf.push(c);
+        i += 1;
+    }
+    flush(&mut buf, spans);
+}
+
+/// Render a slice of LaTeX source as a single inline math span.
+fn push_math_span(spans: &mut Vec<Span<'static>>, latex: &[char]) {
+    let latex: String = latex.iter().collect();
+    let rendered = crate::engines::math::latex_to_unicode(latex.trim()).replace('\n', " ");
+    spans.push(Span::styled(rendered, math_style()));
+}
+
+/// Map an opening math sentinel to the closing one it expects.
+fn math_close_marker(c: char) -> Option<char> {
+    match c {
+        MATH_INLINE_OPEN => Some(MATH_INLINE_CLOSE),
+        MATH_DISPLAY_OPEN => Some(MATH_DISPLAY_CLOSE),
+        _ => None,
+    }
+}
+
+/// If a paragraph is a bare display-math block (sentinel-delimited by
+/// preprocessing), return its LaTeX body. Returns `None` when the paragraph
+/// mixes math with other inline formatting, so only genuine display equations
+/// are treated specially.
+fn paragraph_display_math<'a>(node: &'a comrak::nodes::AstNode<'a>) -> Option<String> {
+    use comrak::nodes::NodeValue;
+    let mut text = String::new();
+    for child in node.children() {
+        match &child.data.borrow().value {
+            NodeValue::Text(t) => text.push_str(t),
+            NodeValue::SoftBreak | NodeValue::LineBreak => text.push('\n'),
+            // Any other inline node means this is prose, not a bare equation.
+            _ => return None,
+        }
+    }
+    let trimmed = text.trim();
+    let inner = trimmed
+        .strip_prefix(MATH_DISPLAY_OPEN)?
+        .strip_suffix(MATH_DISPLAY_CLOSE)?;
+    if inner.is_empty() {
+        return None;
+    }
+    Some(inner.trim().to_string())
 }
 
 fn heading_style(level: u8) -> Style {
@@ -1116,6 +1532,96 @@ mod tests {
         let lines = render_markdown(content);
         // Should render some content
         assert!(!lines.is_empty());
+    }
+
+    fn rendered_text(content: &str) -> String {
+        render_markdown(content)
+            .iter()
+            .map(md_line_text)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn renders_inline_math() {
+        let out = rendered_text("Energy is $E = mc^2$ today.");
+        assert!(out.contains("E = mc²"), "got: {out}");
+        assert!(!out.contains('$'), "delimiters should be consumed: {out}");
+    }
+
+    #[test]
+    fn leaves_currency_alone() {
+        let out = rendered_text("It cost $2.3M and $5 total.");
+        assert!(out.contains("$2.3M"), "got: {out}");
+        assert!(out.contains("$5"), "got: {out}");
+    }
+
+    #[test]
+    fn renders_display_math_block() {
+        let content = "Formula:\n\n$$\nx = \\frac{-b}{2a}\n$$\n";
+        let out = rendered_text(content);
+        assert!(out.contains("x = (-b)/(2a)"), "got: {out}");
+        assert!(!out.contains("$$"), "delimiters should be consumed: {out}");
+    }
+
+    #[test]
+    fn inline_math_in_heading() {
+        let out = rendered_text("## The $\\alpha$ chapter\n");
+        assert!(out.contains("α"), "got: {out}");
+    }
+
+    #[test]
+    fn supports_paren_inline_delimiters() {
+        // `\(...\)` inline math, including inner spaces which the `$` form rejects.
+        let out = rendered_text("Pythagoras wrote \\( a^2 + b^2 = c^2 \\) here.");
+        assert!(out.contains("a² + b² = c²"), "got: {out}");
+        // The `\(` / `\)` delimiters themselves must not survive as text.
+        assert!(!out.contains("\\("), "delimiters should be consumed: {out}");
+        assert!(!out.contains('\u{E000}'), "sentinels should be consumed: {out}");
+    }
+
+    #[test]
+    fn supports_bracket_display_delimiters() {
+        let content = "Pythagoras:\n\n\\[ a^2 + b^2 = c^2 \\]\n";
+        let out = rendered_text(content);
+        assert!(out.contains("a² + b² = c²"), "got: {out}");
+        assert!(!out.contains('['), "delimiters should be consumed: {out}");
+    }
+
+    #[test]
+    fn multiline_bracket_display() {
+        let content = "\\[\nx = \\frac{-b}{2a}\n\\]\n";
+        let out = rendered_text(content);
+        assert!(out.contains("x = (-b)/(2a)"), "got: {out}");
+    }
+
+    #[test]
+    fn backslash_punctuation_commands_survive() {
+        // `\,` (thin space) and `\{`/`\}` must not be stripped by comrak before
+        // the math renderer sees them.
+        let out = rendered_text("The integral $\\int_0^1 f\\,dx$ converges.");
+        // `\,` renders as a space, so the comma must NOT appear.
+        assert!(out.contains("∫₀¹ f dx"), "got: {out}");
+        assert!(!out.contains("f,dx") && !out.contains("f ,dx"), "got: {out}");
+
+        let braces = rendered_text("A set $\\{1, 2, 3\\}$ here.");
+        assert!(braces.contains("{1, 2, 3}"), "got: {braces}");
+    }
+
+    #[test]
+    fn backslash_punctuation_in_paren_delimiters_survive() {
+        let out = rendered_text("Euler: \\( e^{i\\pi} \\; \\{x\\} \\).");
+        assert!(out.contains("{x}"), "got: {out}");
+    }
+
+    #[test]
+    fn paren_delimiters_in_code_are_left_alone() {
+        // Inline code and fenced code must keep the literal `\(...\)` text.
+        let inline = rendered_text("Use `\\(x\\)` for inline math.");
+        assert!(inline.contains("\\(x\\)"), "inline code got: {inline}");
+
+        let fenced = rendered_text("```\n\\[ y = x \\]\n```\n");
+        assert!(fenced.contains("\\[ y = x \\]"), "fenced got: {fenced}");
     }
 
     #[test]
