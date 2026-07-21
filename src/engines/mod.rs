@@ -3,6 +3,21 @@ use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+/// Maximum size for engines that load a whole file into a `String`.
+pub(crate) const MAX_TEXT_FILE_SIZE: u64 = 50 * 1024 * 1024;
+
+/// Read a text file into a `String`, capped at [`MAX_TEXT_FILE_SIZE`] and
+/// tolerant of invalid UTF-8 (lossily replaced) so a single bad byte does not
+/// abort the whole program. Used by engines that need the full file in memory.
+pub(crate) fn read_text_file(path: &std::path::Path) -> anyhow::Result<String> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut handle = file.take(MAX_TEXT_FILE_SIZE);
+    let mut bytes = Vec::new();
+    handle.read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Terminal display width of a string in columns (CJK/emoji count as 2,
 /// combining marks as 0), not byte length or character count.
 pub(crate) fn display_width(s: &str) -> usize {

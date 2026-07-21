@@ -58,8 +58,10 @@ impl TextEngine {
         })
     }
 
-    /// Get line content at given index (zero-copy from mmap)
-    fn get_line(&self, idx: usize) -> Option<&str> {
+    /// Get line content at given index. Zero-copy from the mmap for valid UTF-8;
+    /// an owned lossy copy for lines with invalid bytes (so such lines are shown
+    /// with replacement chars, never silently dropped).
+    fn get_line(&self, idx: usize) -> Option<std::borrow::Cow<'_, str>> {
         if idx >= self.line_offsets.len() {
             return None;
         }
@@ -79,7 +81,7 @@ impl TextEngine {
             line_end -= 1;
         }
 
-        std::str::from_utf8(&self.mmap[start..line_end]).ok()
+        Some(String::from_utf8_lossy(&self.mmap[start..line_end]))
     }
 
     /// Total number of lines in the file

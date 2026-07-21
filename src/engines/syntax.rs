@@ -45,7 +45,7 @@ pub struct SyntaxEngine {
 
 impl SyntaxEngine {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+        let content = super::read_text_file(path)?;
         let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
         let syntax_set = SyntaxSet::load_defaults_newlines();
         let theme_set = ThemeSet::load_defaults();

@@ -109,6 +109,14 @@ impl App {
             Paging::Never => return self.run_plain(cols),
             Paging::Auto => {}
         }
+        // Cheap lower-bound pre-check: content_height counts unwrapped lines, so
+        // if it already exceeds the screen the file cannot fit — page without
+        // materializing (and syntax-highlighting / JSON-parsing) the whole file.
+        // Reserve a few rows for the header and box borders.
+        const CHROME_ROWS: usize = 4;
+        if self.engine.content_height().saturating_add(CHROME_ROWS) > rows as usize {
+            return self.run_tui();
+        }
         let inner_width = cols.saturating_sub(2) as usize;
         let all_lines = self.build_plain_lines(inner_width);
         let boxed = box_lines(all_lines, inner_width);

@@ -37,7 +37,7 @@ enum LogicKind {
 
 impl LogicEngine {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let raw = std::fs::read_to_string(path)?;
+        let raw = super::read_text_file(path)?;
         let file_name = path
             .file_name()
             .and_then(|s| s.to_str())

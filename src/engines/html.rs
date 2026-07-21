@@ -33,7 +33,7 @@ pub struct HtmlEngine {
 
 impl HtmlEngine {
     pub fn from_path(path: &Path) -> Result<Self> {
-        let content = std::fs::read_to_string(path)?;
+        let content = super::read_text_file(path)?;
         let doc = Html::parse_document(&content);
         let mut rows = Vec::new();
         let root = doc.root_element();

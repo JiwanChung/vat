@@ -280,7 +280,7 @@ impl LockEngine {
 }
 
 fn parse_cargo_lock(path: &Path) -> Result<Vec<LockEntry>> {
-    let content = std::fs::read_to_string(path)?;
+    let content = super::read_text_file(path)?;
     let value: toml::Value = toml::from_str(&content)?;
     let packages = value
         .get("package")
@@ -330,7 +330,7 @@ fn parse_cargo_lock(path: &Path) -> Result<Vec<LockEntry>> {
 }
 
 fn parse_package_lock(path: &Path) -> Result<Vec<LockEntry>> {
-    let content = std::fs::read_to_string(path)?;
+    let content = super::read_text_file(path)?;
     let value: serde_json::Value = serde_json::from_str(&content)?;
     if let Some(packages) = value.get("packages").and_then(|v| v.as_object()) {
         let mut entries = Vec::new();
@@ -419,7 +419,7 @@ fn flatten_package_lock_deps(deps: &serde_json::Map<String, serde_json::Value>, 
 }
 
 fn parse_pnpm_lock(path: &Path) -> Result<Vec<LockEntry>> {
-    let content = std::fs::read_to_string(path)?;
+    let content = super::read_text_file(path)?;
     let value: serde_yaml::Value = serde_yaml::from_str(&content)?;
     let json = serde_json::to_value(value)?;
     let packages = json

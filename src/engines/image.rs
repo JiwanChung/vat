@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use image::GenericImageView;
+use image::ImageDecoder;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
@@ -49,10 +49,16 @@ impl ImageEngine {
         let metadata = std::fs::metadata(path)?;
         let file_size = metadata.len();
 
-        let img = image::open(path).map_err(|e| anyhow!("Failed to open image: {}", e))?;
-
-        let (width, height) = img.dimensions();
-        let color = img.color();
+        // Read dimensions and color type from the header only — never decode the
+        // full raster (a decompression-bomb header could otherwise OOM us).
+        let reader = image::ImageReader::open(path)?
+            .with_guessed_format()
+            .map_err(|e| anyhow!("Failed to read image: {}", e))?;
+        let decoder = reader
+            .into_decoder()
+            .map_err(|e| anyhow!("Failed to decode image header: {}", e))?;
+        let (width, height) = decoder.dimensions();
+        let color = decoder.color_type();
 
         let format = path
             .extension()
