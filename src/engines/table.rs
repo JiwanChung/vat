@@ -236,9 +236,14 @@ impl TableEngine {
                 self.pending_g = false;
             }
         }
+        let nav_max = if self.schema_view {
+            self.df.width()
+        } else {
+            self.df.height()
+        };
         match key.code {
             KeyCode::Char('j') | KeyCode::Down => {
-                if self.selection + 1 < self.df.height() {
+                if self.selection + 1 < nav_max {
                     self.selection += 1;
                 }
             }
@@ -287,6 +292,8 @@ impl TableEngine {
             }
             KeyCode::Char('s') => {
                 self.schema_view = !self.schema_view;
+                self.selection = 0;
+                self.scroll = 0;
             }
             KeyCode::Char('n') => {
                 if let Some(query) = self.last_match.clone() {
@@ -299,8 +306,8 @@ impl TableEngine {
                 }
             }
             KeyCode::Char('G') => {
-                if self.df.height() > 0 {
-                    self.selection = self.df.height() - 1;
+                if nav_max > 0 {
+                    self.selection = nav_max - 1;
                 }
             }
             _ => {}
@@ -640,10 +647,59 @@ impl TableEngine {
         );
     }
 
-    fn render_schema(&self, frame: &mut ratatui::Frame, area: Rect) {
+    fn render_schema(&mut self, frame: &mut ratatui::Frame, area: Rect) {
+        let height = area.height as usize;
+        let cols = self.df.get_columns();
+        let total = cols.len();
+        if self.selection >= total && total > 0 {
+            self.selection = total - 1;
+        }
+        if self.selection < self.scroll {
+            self.scroll = self.selection;
+        } else if self.selection >= self.scroll + height {
+            self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
+        }
+
+        let name_w = cols
+            .iter()
+            .map(|c| super::display_width(c.name()))
+            .max()
+            .unwrap_or(0);
+        let type_w = cols
+            .iter()
+            .map(|c| format!("{}", c.dtype()).len())
+            .max()
+            .unwrap_or(0);
+        let rows = self.df.height();
+
         let mut lines = Vec::new();
-        for field in self.df.schema().iter_fields() {
-            lines.push(Line::from(format!("{}: {}", field.name(), field.data_type())));
+        for (i, series) in cols.iter().enumerate().skip(self.scroll).take(height) {
+            let name = super::pad_to_width(&series.name().to_string(), name_w);
+            let ty = format!("{:<w$}", format!("{}", series.dtype()), w = type_w);
+            let nulls = series.null_count();
+            let unique = series.n_unique().unwrap_or(0);
+            let stats = format!(
+                "nulls {}/{}  unique {}",
+                nulls, rows, unique
+            );
+            let selected = i == self.selection;
+            let (name_style, type_style, stat_style) = if selected {
+                let s = Style::default().fg(Color::Black).bg(Color::LightBlue);
+                (s.bold(), s, s)
+            } else {
+                (
+                    Style::default().fg(Color::LightCyan).bold(),
+                    dtype_style(series.dtype()),
+                    Style::default().fg(Color::DarkGray),
+                )
+            };
+            lines.push(Line::from(vec![
+                Span::styled(name, name_style),
+                Span::raw("  "),
+                Span::styled(ty, type_style),
+                Span::raw("  "),
+                Span::styled(stats, stat_style),
+            ]));
         }
         let block = Block::default().borders(Borders::NONE);
         frame.render_widget(Paragraph::new(lines).block(block), area);
