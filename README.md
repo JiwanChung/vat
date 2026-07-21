@@ -69,7 +69,7 @@ cargo install --path .
 | **Smart Format Detection** | Automatically picks the best viewer for 20+ file types |
 | **Vim-style Navigation** | `j/k`, `gg/G`, `Ctrl+u/d` — feels like home |
 | **Collapsible Trees** | Fold/unfold JSON, YAML, TOML, XML, and HTML nodes |
-| **Search & Filter** | Find with `/`, filter visible lines with `f` |
+| **Search & Filter** | Incremental regex search (`/`, smart-case, match count), filter with `f` |
 | **Visual Selection** | Select ranges with `v`, yank to clipboard with `y` |
 | **Clipboard Integration** | Copy lines with `yy`, selections with `vy` |
 | **Stdin Support** | Pipe data directly: `curl ... \| vat -l json -` |
@@ -129,9 +129,16 @@ cargo install --path .
 ### Binary & Media
 | Format | Extensions | Features |
 |--------|------------|----------|
-| Images | `.jpg`, `.png`, `.gif`, `.webp` | ASCII preview, dimensions, metadata |
-| Binary | (auto-detected) | Hex viewer with ASCII column |
+| Images | `.jpg`, `.png`, `.gif`, `.webp` | Dimensions, color type, metadata (header-only) |
+| Binary | (auto-detected) | Hex viewer with ASCII column and `/` search (`0x..` or text) |
 | Log files | `.log` | Timestamp parsing, level filtering |
+
+### Other
+| Format | Extensions | Features |
+|--------|------------|----------|
+| Certificates | `.pem`, `.crt`, `.cer`, `.der` | X.509 subject/issuer/validity/serial/SANs |
+| Jupyter | `.ipynb` | Cells rendered as Markdown + code blocks + outputs |
+| Directories | (a path to a dir) | Annotated listing with sizes and detected types |
 
 ## Usage
 
@@ -151,6 +158,18 @@ vat --paging=never file.json    # Print and exit
 # Plain output (for piping)
 vat -p file.json                # Raw output, no formatting
 vat file.json | head            # Auto-detects pipe, outputs raw
+
+# Multiple files (switch with ] / [ in the TUI) and directories
+vat a.json b.csv c.md
+vat src/                        # Directory listing
+
+# Color and line ranges
+vat --color=never file.rs       # NO_COLOR is also honored
+vat -r 20:40 file.rs            # Only lines 20–40
+
+# Shell completions and man page
+vat --completions zsh > _vat
+vat --man > vat.1
 ```
 
 ## Keybindings
@@ -163,15 +182,18 @@ vat file.json | head            # Auto-detects pipe, outputs raw
 | `k` / `↑` | Move up |
 | `gg` | Jump to top |
 | `G` | Jump to bottom |
+| `:N` | Go to line N |
+| `Nj` / `Nk` / `NG` | Count prefix (e.g. `10j`, `25G`) |
 | `Ctrl+d` | Half page down |
 | `Ctrl+u` | Half page up |
+| `]` / `[` | Next / previous file |
 
 ### Search & Filter
 
 | Key | Action |
 |-----|--------|
-| `/` | Search |
-| `f` | Filter (show only matches) |
+| `/` | Search (regex, smart-case; incremental with a live match count) |
+| `f` | Filter to matches (text/JSONL; jump-to-match elsewhere) |
 | `F` | Clear filter |
 | `n` | Next match |
 | `N` | Previous match |
@@ -291,6 +313,9 @@ src/
     ├── table.rs     # CSV, TSV, Parquet
     ├── syntax.rs    # Source code highlighting + Markdown
     ├── math.rs      # LaTeX math -> Unicode (Markdown)
+    ├── cert.rs      # X.509 certificate decoding
+    ├── notebook.rs  # Jupyter .ipynb -> Markdown
+    ├── dir.rs       # Directory listing
     ├── sqlite.rs    # Database browser
     ├── archive.rs   # ZIP, TAR viewer
     ├── hex.rs       # Binary viewer
