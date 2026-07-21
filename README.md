@@ -1,4 +1,6 @@
 <p align="center">
+  <a href="https://crates.io/crates/vat-viewer"><img src="https://img.shields.io/crates/v/vat-viewer.svg" alt="crates.io"></a>
+  <a href="https://github.com/JiwanChung/vat/actions/workflows/ci.yml"><img src="https://github.com/JiwanChung/vat/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/rust-1.70+-orange.svg" alt="Rust 1.70+">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License">
   <img src="https://img.shields.io/github/stars/JiwanChung/vat?style=social" alt="GitHub Stars">
@@ -287,7 +289,8 @@ src/
 └── engines/
     ├── tree.rs      # JSON, YAML, TOML, KDL
     ├── table.rs     # CSV, TSV, Parquet
-    ├── syntax.rs    # Source code highlighting
+    ├── syntax.rs    # Source code highlighting + Markdown
+    ├── math.rs      # LaTeX math -> Unicode (Markdown)
     ├── sqlite.rs    # Database browser
     ├── archive.rs   # ZIP, TAR viewer
     ├── hex.rs       # Binary viewer
@@ -312,7 +315,25 @@ MIT
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request. Every
+push and PR runs the test suite on Linux and macOS via GitHub Actions.
+
+## Releasing
+
+Releases are published to [crates.io](https://crates.io/crates/vat-viewer)
+automatically by the `Release` workflow when a version tag is pushed:
+
+```bash
+# 1. Bump the version in Cargo.toml, commit, and push.
+# 2. Tag the release (the tag must match the Cargo.toml version) and push it:
+git tag v0.1.1
+git push origin v0.1.1
+```
+
+The workflow verifies the tag matches `Cargo.toml`, runs the tests, and then
+runs `cargo publish`. It requires a `CARGO_REGISTRY_TOKEN` repository secret
+(**Settings → Secrets and variables → Actions**) containing a
+[crates.io API token](https://crates.io/settings/tokens).
 
 ---
 
