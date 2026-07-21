@@ -12,6 +12,13 @@ pub fn analyze(path: &Path) -> Result<EngineState> {
     let file_name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
+    // Directory: render an annotated listing.
+    if path.is_dir() {
+        let md = crate::engines::dir::to_markdown(path)?;
+        let name = if file_name.is_empty() { path.display().to_string() } else { file_name.to_string() };
+        return Ok(EngineState::Syntax(SyntaxEngine::from_markdown(name, &md)));
+    }
+
     // Check for parquet magic bytes (need to read first 4 bytes)
     if ext == "parquet" || is_parquet_file(path) {
         return TableEngine::from_path(path).map(EngineState::Table);

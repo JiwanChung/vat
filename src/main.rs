@@ -12,8 +12,8 @@ mod search;
 #[derive(Parser, Debug)]
 #[command(name = "vat", version, about = "Semantic file viewer")]
 struct Args {
-    /// Path to the file to view (use "-" for stdin)
-    path: Option<String>,
+    /// Files to view (use "-" for stdin). Switch between them with ] / [.
+    paths: Vec<String>,
     /// Paging mode: auto, always, never (bat-compatible)
     #[arg(long, value_enum, default_value = "auto")]
     paging: Paging,
@@ -73,26 +73,30 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    let arg_path = match args.path.as_deref() {
-        Some(p) => p.to_string(),
-        None => {
-            Args::command().print_help()?;
-            return Ok(());
+    if args.paths.is_empty() {
+        Args::command().print_help()?;
+        return Ok(());
+    }
+
+    // Build the list of files to view. `-` reads stdin into a temp file that we
+    // keep alive (`_temps`) for the duration of the run.
+    let mut _temps = Vec::new();
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    for arg_path in &args.paths {
+        if arg_path == "-" {
+            let (path, temp) = read_stdin_to_temp(&args.language)?;
+            if let Some(t) = temp {
+                _temps.push(t);
+            }
+            let display = format!(
+                "<stdin>{}",
+                args.language.as_ref().map(|l| format!(".{}", l)).unwrap_or_default()
+            );
+            files.push((display, path));
+        } else {
+            files.push((arg_path.clone(), PathBuf::from(arg_path)));
         }
-    };
-
-    // Handle stdin
-    let (path, _temp_file) = if arg_path == "-" {
-        read_stdin_to_temp(&args.language)?
-    } else {
-        (PathBuf::from(&arg_path), None)
-    };
-
-    let display_path = if arg_path == "-" {
-        format!("<stdin>{}", args.language.as_ref().map(|l| format!(".{}", l)).unwrap_or_default())
-    } else {
-        arg_path.clone()
-    };
+    }
 
     // Resolve color: NO_COLOR (any value) forces off; auto follows the TTY.
     let use_color = match args.color {
@@ -102,11 +106,11 @@ fn main() -> Result<()> {
     };
     let line_range = args.line_range.as_deref().and_then(parse_line_range);
 
-    let engine = analyzer::analyze(&path)?;
+    let engine = analyzer::analyze(&files[0].1)?;
     let mut app = app::App::new(
         engine,
-        display_path,
-        path,
+        files,
+        0,
         args.paging.into(),
         args.plain,
         use_color,

@@ -62,6 +62,7 @@ pub(crate) fn pad_start_to_width(s: &str, width: usize) -> String {
 
 mod archive;
 pub(crate) mod cert;
+pub(crate) mod dir;
 mod dockerfile;
 mod env;
 mod gitignore;

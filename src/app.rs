@@ -38,6 +38,10 @@ pub struct App {
     file_path: String,
     /// Actual file path for raw mode (may differ from display path for stdin)
     source_path: PathBuf,
+    /// All files passed on the command line: (display, source). Switch with ]/[.
+    files: Vec<(String, PathBuf)>,
+    /// Index into `files` of the currently viewed file.
+    current_file: usize,
     paging: Paging,
     force_raw: bool,
     /// Active filter query (shows only matching lines)
@@ -69,13 +73,17 @@ pub struct App {
 impl App {
     pub fn new(
         engine: EngineState,
-        file_path: String,
-        source_path: PathBuf,
+        files: Vec<(String, PathBuf)>,
+        current_file: usize,
         paging: Paging,
         force_raw: bool,
         use_color: bool,
         line_range: Option<(usize, usize)>,
     ) -> Self {
+        let (file_path, source_path) = files
+            .get(current_file)
+            .cloned()
+            .unwrap_or_else(|| (String::new(), PathBuf::new()));
         Self {
             engine,
             should_quit: false,
@@ -88,6 +96,8 @@ impl App {
             status: None,
             file_path,
             source_path,
+            files,
+            current_file,
             paging,
             force_raw,
             filter: None,
@@ -100,6 +110,35 @@ impl App {
             search_match_count: None,
             use_color,
             line_range,
+        }
+    }
+
+    /// Switch to the next/previous file (`]` / `[`), re-analyzing it. Keeps the
+    /// current file on failure and reports the error.
+    fn switch_file(&mut self, forward: bool) {
+        let n = self.files.len();
+        if n <= 1 {
+            return;
+        }
+        let next = if forward {
+            (self.current_file + 1) % n
+        } else {
+            (self.current_file + n - 1) % n
+        };
+        let (display, source) = self.files[next].clone();
+        match crate::analyzer::analyze(&source) {
+            Ok(engine) => {
+                self.engine = engine;
+                self.current_file = next;
+                self.file_path = display;
+                self.source_path = source;
+                self.input.active = false;
+                self.visual_start = None;
+                self.filter = None;
+                self.pending_count = None;
+                self.status = Some(format!("[{}/{}] {}", next + 1, n, self.file_path));
+            }
+            Err(e) => self.status = Some(format!("Cannot open {}: {}", display, e)),
         }
     }
 
@@ -469,6 +508,8 @@ impl App {
                 self.wrap = !self.wrap;
                 self.status = Some(if self.wrap { "Wrap ON".to_string() } else { "Wrap OFF".to_string() });
             }
+            KeyCode::Char(']') => self.switch_file(true),
+            KeyCode::Char('[') => self.switch_file(false),
             KeyCode::Char('F') => {
                 // Clear filter
                 self.filter = None;
@@ -653,6 +694,7 @@ impl App {
             Line::from("  :N           Go to line N"),
             Line::from("  Nj/Nk/NG     Count prefix (e.g. 10j, 25G)"),
             Line::from("  Ctrl+u/d     Half-page up/down"),
+            Line::from("  ] / [        Next / previous file"),
             Line::from(""),
             Line::from(vec![
                 Span::styled("Search & Filter", Style::default().bold()),
@@ -981,7 +1023,15 @@ mod tests {
         let path = f.path().to_path_buf();
         let engine = crate::analyzer::analyze(&path).unwrap();
         std::mem::forget(f); // keep the mmap-backed file on disk for the test
-        App::new(engine, "test".into(), path, Paging::Never, false, false, None)
+        App::new(
+            engine,
+            vec![("test".into(), path)],
+            0,
+            Paging::Never,
+            false,
+            false,
+            None,
+        )
     }
 
     #[test]
