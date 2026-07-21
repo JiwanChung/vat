@@ -1,4 +1,4 @@
-use std::io::{self, Read, Write};
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
@@ -23,6 +23,12 @@ struct Args {
     /// Language/format hint for stdin (e.g., json, yaml, csv, jsonl)
     #[arg(short = 'l', long)]
     language: Option<String>,
+    /// When to use color: auto (default), always, never. NO_COLOR is honored.
+    #[arg(long, value_enum, default_value = "auto")]
+    color: ColorChoice,
+    /// Show only a line range in plain output, e.g. "20:40", ":40", "20:".
+    #[arg(short = 'r', long)]
+    line_range: Option<String>,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -30,6 +36,21 @@ enum Paging {
     Auto,
     Always,
     Never,
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+enum ColorChoice {
+    Auto,
+    Always,
+    Never,
+}
+
+/// Parse a `START:END` line range (either side optional) into 1-based bounds.
+fn parse_line_range(s: &str) -> Option<(usize, usize)> {
+    let (a, b) = s.split_once(':')?;
+    let start = if a.trim().is_empty() { 1 } else { a.trim().parse().ok()? };
+    let end = if b.trim().is_empty() { usize::MAX } else { b.trim().parse().ok()? };
+    Some((start.max(1), end))
 }
 
 fn main() -> Result<()> {
@@ -48,8 +69,24 @@ fn main() -> Result<()> {
         args.path.clone()
     };
 
+    // Resolve color: NO_COLOR (any value) forces off; auto follows the TTY.
+    let use_color = match args.color {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => std::env::var_os("NO_COLOR").is_none() && io::stdout().is_terminal(),
+    };
+    let line_range = args.line_range.as_deref().and_then(parse_line_range);
+
     let engine = analyzer::analyze(&path)?;
-    let mut app = app::App::new(engine, display_path, path, args.paging.into(), args.plain);
+    let mut app = app::App::new(
+        engine,
+        display_path,
+        path,
+        args.paging.into(),
+        args.plain,
+        use_color,
+        line_range,
+    );
     app.run()
 }
 

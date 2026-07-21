@@ -55,6 +55,10 @@ pub struct App {
     /// Match count for the current search query, recomputed per keystroke (not
     /// per frame). `None` when the engine can't count or no query is active.
     search_match_count: Option<usize>,
+    /// Whether to emit ANSI color in non-interactive (plain) output.
+    use_color: bool,
+    /// Optional 1-based line range for plain output (start, end inclusive).
+    line_range: Option<(usize, usize)>,
     /// One clipboard handle for the process lifetime. Kept alive so copied text
     /// remains available to paste while vat is running (on X11 the selection is
     /// served by the owning process). `None` if the platform clipboard is
@@ -69,6 +73,8 @@ impl App {
         source_path: PathBuf,
         paging: Paging,
         force_raw: bool,
+        use_color: bool,
+        line_range: Option<(usize, usize)>,
     ) -> Self {
         Self {
             engine,
@@ -92,6 +98,8 @@ impl App {
             clipboard: Clipboard::new().ok(),
             pending_count: None,
             search_match_count: None,
+            use_color,
+            line_range,
         }
     }
 
@@ -157,7 +165,7 @@ impl App {
         let all_lines = self.build_plain_lines(inner_width);
         let boxed = box_lines(all_lines, inner_width);
         if boxed.len() <= rows as usize {
-            write_plain(boxed)?;
+            write_plain(boxed, self.use_color)?;
             return Ok(());
         }
         self.run_tui()
@@ -166,8 +174,34 @@ impl App {
     /// Output raw file content without any formatting (for piping)
     /// Uses streaming to handle arbitrarily large files efficiently
     fn run_raw(&self) -> Result<()> {
-        let mut file = fs::File::open(&self.source_path)?;
         let mut stdout = io::stdout().lock();
+
+        // With a line range, stream only the requested 1-based lines.
+        if let Some((start, end)) = self.line_range {
+            use std::io::BufRead;
+            let file = fs::File::open(&self.source_path)?;
+            let reader = io::BufReader::new(file);
+            for (i, line) in reader.lines().enumerate() {
+                let n = i + 1;
+                if n < start {
+                    continue;
+                }
+                if n > end {
+                    break;
+                }
+                let line = line?;
+                if let Err(e) = writeln!(stdout, "{}", line) {
+                    if e.kind() == io::ErrorKind::BrokenPipe {
+                        break;
+                    }
+                    return Err(e.into());
+                }
+            }
+            let _ = stdout.flush();
+            return Ok(());
+        }
+
+        let mut file = fs::File::open(&self.source_path)?;
         // Ignore broken pipe errors (e.g., when piping to head/tail)
         if let Err(e) = io::copy(&mut file, &mut stdout) {
             if e.kind() != io::ErrorKind::BrokenPipe {
@@ -182,13 +216,23 @@ impl App {
         let inner_width = cols.saturating_sub(2) as usize;
         let lines = self.build_plain_lines(inner_width);
         let boxed = box_lines(lines, inner_width);
-        write_plain(boxed)?;
+        write_plain(boxed, self.use_color)?;
         Ok(())
     }
 
     fn build_plain_lines(&mut self, inner_width: usize) -> Vec<Line<'static>> {
         let mut header_lines = self.plain_header_lines(inner_width);
-        let content_lines = self.engine.render_plain_lines(inner_width as u16);
+        let mut content_lines = self.engine.render_plain_lines(inner_width as u16);
+        // Apply an optional 1-based line range to the rendered content.
+        if let Some((start, end)) = self.line_range {
+            let lo = start.saturating_sub(1).min(content_lines.len());
+            let hi = end.min(content_lines.len());
+            content_lines = if lo < hi {
+                content_lines[lo..hi].to_vec()
+            } else {
+                Vec::new()
+            };
+        }
         // Connect rule line to content gutter if present
         if let Some(first) = content_lines.first() {
             let (gutter_width, _) = detect_gutter(&first.spans);
@@ -680,13 +724,17 @@ impl App {
     }
 }
 
-fn write_plain(lines: Vec<Line<'static>>) -> Result<()> {
+fn write_plain(lines: Vec<Line<'static>>, color: bool) -> Result<()> {
     let mut stdout = io::stdout();
     for line in lines {
         for span in line.spans {
-            apply_style(&mut stdout, span.style)?;
-            write!(stdout, "{}", span.content)?;
-            reset_style(&mut stdout)?;
+            if color {
+                apply_style(&mut stdout, span.style)?;
+                write!(stdout, "{}", span.content)?;
+                reset_style(&mut stdout)?;
+            } else {
+                write!(stdout, "{}", span.content)?;
+            }
         }
         writeln!(stdout)?;
     }
@@ -931,7 +979,7 @@ mod tests {
         let path = f.path().to_path_buf();
         let engine = crate::analyzer::analyze(&path).unwrap();
         std::mem::forget(f); // keep the mmap-backed file on disk for the test
-        App::new(engine, "test".into(), path, Paging::Never, false)
+        App::new(engine, "test".into(), path, Paging::Never, false, false, None)
     }
 
     #[test]
