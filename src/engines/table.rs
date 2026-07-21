@@ -586,8 +586,8 @@ impl TableEngine {
         let col_names = self.df.get_column_names();
         let columns = self.df.get_columns();
 
-        // Find the max column name length for alignment
-        let max_name_len = col_names.iter().map(|n| n.len()).max().unwrap_or(0);
+        // Find the max column name display width for alignment
+        let max_name_len = col_names.iter().map(|n| super::display_width(n)).max().unwrap_or(0);
 
         let mut lines = Vec::new();
 
@@ -604,7 +604,7 @@ impl TableEngine {
                     .get(row_idx)
                     .map(|v| v.to_string())
                     .unwrap_or_default();
-                let padding = " ".repeat(max_name_len.saturating_sub(name.len()));
+                let padding = " ".repeat(max_name_len.saturating_sub(super::display_width(name)));
                 let style = dtype_style(columns[i].dtype());
                 lines.push(Line::from(vec![
                     Span::styled(
@@ -677,11 +677,11 @@ fn compute_col_widths(df: &DataFrame, max_width: usize) -> Vec<usize> {
     df.get_columns()
         .iter()
         .map(|col| {
-            let header_len = col.name().len();
+            let header_len = super::display_width(col.name());
             let mut max_val_len = 0;
             for i in 0..sample_rows {
                 if let Ok(val) = col.get(i) {
-                    let len = val.to_string().len();
+                    let len = super::display_width(&val.to_string());
                     if len > max_val_len {
                         max_val_len = len;
                     }

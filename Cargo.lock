@@ -3491,6 +3491,7 @@ dependencies = [
  "tree-sitter-css",
  "tree-sitter-javascript",
  "tree-sitter-typescript",
+ "unicode-width 0.1.14",
  "zip",
 ]
 

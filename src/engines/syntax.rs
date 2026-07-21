@@ -835,7 +835,7 @@ impl MdRenderer {
                 for (cells, _) in &rows {
                     for (i, cell) in cells.iter().enumerate() {
                         if i < num_cols {
-                            col_widths[i] = col_widths[i].max(cell.len());
+                            col_widths[i] = col_widths[i].max(super::display_width(cell));
                         }
                     }
                 }
@@ -858,14 +858,14 @@ impl MdRenderer {
                         let w = col_widths.get(i).copied().unwrap_or(0);
                         use comrak::nodes::TableAlignment;
                         let aligned = match alignments.get(i) {
-                            Some(TableAlignment::Right) => format!("{:>width$}", cell, width = w),
+                            Some(TableAlignment::Right) => super::pad_start_to_width(cell, w),
                             Some(TableAlignment::Center) => {
-                                let pad = w.saturating_sub(cell.len());
+                                let pad = w.saturating_sub(super::display_width(cell));
                                 let left = pad / 2;
                                 let right = pad - left;
                                 format!("{}{}{}", " ".repeat(left), cell, " ".repeat(right))
                             }
-                            _ => format!("{:<width$}", cell, width = w),
+                            _ => super::pad_to_width(cell, w),
                         };
                         let style = if *is_header {
                             Style::default().fg(Color::LightCyan).bold()

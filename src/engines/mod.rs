@@ -1,6 +1,39 @@
 use crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+/// Terminal display width of a string in columns (CJK/emoji count as 2,
+/// combining marks as 0), not byte length or character count.
+pub(crate) fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(s)
+}
+
+/// Display width of a single character in columns (0 for combining marks).
+pub(crate) fn char_width(c: char) -> usize {
+    UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Right-pad `s` with spaces to at least `width` display columns. If `s` is
+/// already that wide, it is returned unchanged.
+pub(crate) fn pad_to_width(s: &str, width: usize) -> String {
+    let w = display_width(s);
+    if w >= width {
+        s.to_string()
+    } else {
+        format!("{}{}", s, " ".repeat(width - w))
+    }
+}
+
+/// Left-pad `s` with spaces to at least `width` display columns.
+pub(crate) fn pad_start_to_width(s: &str, width: usize) -> String {
+    let w = display_width(s);
+    if w >= width {
+        s.to_string()
+    } else {
+        format!("{}{}", " ".repeat(width - w), s)
+    }
+}
 
 mod archive;
 mod dockerfile;
@@ -453,8 +486,8 @@ pub(crate) fn wrap_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'s
     }
     let mut result = Vec::new();
     for line in lines {
-        let total_chars: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-        if total_chars <= width {
+        let total_width: usize = line.spans.iter().map(|s| display_width(&s.content)).sum();
+        if total_width <= width {
             result.push(line);
             continue;
         }
@@ -471,7 +504,10 @@ pub(crate) fn wrap_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'s
             let mut buf = String::new();
 
             for ch in span.content.chars() {
-                if col >= width {
+                let cw = char_width(ch);
+                // Break before a character that would overflow the row (using its
+                // display width, so wide glyphs never straddle the boundary).
+                if col + cw > width && col > 0 {
                     if !buf.is_empty() {
                         current_row.push(Span::styled(buf.clone(), style));
                         buf.clear();
@@ -486,7 +522,7 @@ pub(crate) fn wrap_lines(lines: Vec<Line<'static>>, width: usize) -> Vec<Line<'s
                     }
                 }
                 buf.push(ch);
-                col += 1;
+                col += cw;
             }
 
             if !buf.is_empty() {
@@ -514,7 +550,7 @@ fn detect_gutter(spans: &[Span<'static>]) -> (usize, Vec<Span<'static>>) {
         if i > 2 {
             break;
         }
-        let span_width = span.content.chars().count();
+        let span_width = display_width(&span.content);
         if *span.content == *"│ " {
             let total = pre_width + span_width;
             let mut continuation = Vec::new();

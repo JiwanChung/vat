@@ -613,9 +613,9 @@ fn wrap_line_to_width(line: Line<'static>, width: usize) -> Vec<Vec<Span<'static
             if let Some(indent_span) = line.spans.get(gutter_idx + 1) {
                 if !indent_span.content.is_empty()
                     && indent_span.content.chars().all(|c| c == ' ')
-                    && cont_width + indent_span.content.chars().count() < width
+                    && cont_width + crate::engines::display_width(&indent_span.content) < width
                 {
-                    let indent_width = indent_span.content.chars().count();
+                    let indent_width = crate::engines::display_width(&indent_span.content);
                     cont_width += indent_width;
                     cont_spans.push(Span::raw(" ".repeat(indent_width)));
                 }
@@ -651,7 +651,8 @@ fn wrap_line_to_width(line: Line<'static>, width: usize) -> Vec<Vec<Span<'static
                 }
                 continue;
             }
-            if col >= width {
+            let cw = crate::engines::char_width(ch);
+            if col + cw > width && col > 0 {
                 // Flush current buffer into the row before starting a new one
                 if !buf.is_empty() {
                     current_row.push(Span::styled(buf.clone(), style));
@@ -668,7 +669,7 @@ fn wrap_line_to_width(line: Line<'static>, width: usize) -> Vec<Vec<Span<'static
                 }
             }
             buf.push(ch);
-            col += 1;
+            col += cw;
         }
 
         if !buf.is_empty() {
@@ -696,7 +697,7 @@ fn detect_gutter(spans: &[Span<'static>]) -> (usize, Vec<Span<'static>>) {
         if i > 2 {
             break;
         }
-        let span_width = span.content.chars().count();
+        let span_width = crate::engines::display_width(&span.content);
         if *span.content == *"│ " {
             let total = pre_width + span_width;
             let mut continuation = Vec::new();
