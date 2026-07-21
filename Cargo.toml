@@ -44,3 +44,5 @@ flate2 = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 unicode-width = "0.1"
+clap_complete = "4"
+clap_mangen = "0.2"

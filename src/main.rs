@@ -13,7 +13,7 @@ mod search;
 #[command(name = "vat", version, about = "Semantic file viewer")]
 struct Args {
     /// Path to the file to view (use "-" for stdin)
-    path: String,
+    path: Option<String>,
     /// Paging mode: auto, always, never (bat-compatible)
     #[arg(long, value_enum, default_value = "auto")]
     paging: Paging,
@@ -29,6 +29,12 @@ struct Args {
     /// Show only a line range in plain output, e.g. "20:40", ":40", "20:".
     #[arg(short = 'r', long)]
     line_range: Option<String>,
+    /// Print a shell completion script to stdout and exit.
+    #[arg(long, value_name = "SHELL")]
+    completions: Option<clap_complete::Shell>,
+    /// Print a man page (roff) to stdout and exit.
+    #[arg(long)]
+    man: bool,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -54,19 +60,38 @@ fn parse_line_range(s: &str) -> Option<(usize, usize)> {
 }
 
 fn main() -> Result<()> {
+    use clap::CommandFactory;
     let args = Args::parse();
 
-    // Handle stdin
-    let (path, _temp_file) = if args.path == "-" {
-        read_stdin_to_temp(&args.language)?
-    } else {
-        (PathBuf::from(&args.path), None)
+    // Generator flags: print and exit without needing a path.
+    if let Some(shell) = args.completions {
+        clap_complete::generate(shell, &mut Args::command(), "vat", &mut io::stdout());
+        return Ok(());
+    }
+    if args.man {
+        clap_mangen::Man::new(Args::command()).render(&mut io::stdout())?;
+        return Ok(());
+    }
+
+    let arg_path = match args.path.as_deref() {
+        Some(p) => p.to_string(),
+        None => {
+            Args::command().print_help()?;
+            return Ok(());
+        }
     };
 
-    let display_path = if args.path == "-" {
+    // Handle stdin
+    let (path, _temp_file) = if arg_path == "-" {
+        read_stdin_to_temp(&args.language)?
+    } else {
+        (PathBuf::from(&arg_path), None)
+    };
+
+    let display_path = if arg_path == "-" {
         format!("<stdin>{}", args.language.as_ref().map(|l| format!(".{}", l)).unwrap_or_default())
     } else {
-        args.path.clone()
+        arg_path.clone()
     };
 
     // Resolve color: NO_COLOR (any value) forces off; auto follows the TTY.
