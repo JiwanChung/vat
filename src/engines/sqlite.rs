@@ -23,10 +23,17 @@ struct ColumnInfo {
     nullable: bool,
 }
 
+/// Rows loaded per preview window; selection can range over the whole table and
+/// the window is reloaded (LIMIT/OFFSET) as the viewport moves.
+const PREVIEW_WINDOW: usize = 1000;
+
 pub struct SqliteEngine {
     tables: Vec<TableInfo>,
     current_table: usize,
+    /// Rows currently loaded (a window of the current table's rows).
     preview_rows: Vec<Vec<String>>,
+    /// Absolute row index of `preview_rows[0]`.
+    window_offset: usize,
     selection: usize,
     scroll: usize,
     file_name: String,
@@ -57,7 +64,7 @@ impl SqliteEngine {
         let conn = Connection::open(path)?;
         let tables = get_table_info(&conn)?;
         let preview_rows = if !tables.is_empty() {
-            get_preview_rows(&conn, &tables[0].name, &tables[0].columns)?
+            get_preview_rows(&conn, &tables[0].name, &tables[0].columns, 0, PREVIEW_WINDOW)?
         } else {
             Vec::new()
         };
@@ -66,6 +73,7 @@ impl SqliteEngine {
             tables,
             current_table: 0,
             preview_rows,
+            window_offset: 0,
             selection: 0,
             scroll: 0,
             file_name,
@@ -80,13 +88,57 @@ impl SqliteEngine {
     }
 
     fn refresh_preview(&mut self) {
-        if let Ok(conn) = Connection::open(&self.db_path) {
-            if let Some(table) = self.tables.get(self.current_table) {
-                if let Ok(rows) = get_preview_rows(&conn, &table.name, &table.columns) {
+        self.window_offset = 0;
+        self.selection = 0;
+        self.scroll = 0;
+        self.load_window(0);
+    }
+
+    /// Total rows in the current table.
+    fn table_row_count(&self) -> usize {
+        self.tables.get(self.current_table).map(|t| t.row_count).unwrap_or(0)
+    }
+
+    /// Load a window of `PREVIEW_WINDOW` rows starting at absolute row `offset`.
+    /// On failure the previous window is left in place (nothing is invented).
+    fn load_window(&mut self, offset: usize) {
+        if let Some(table) = self.tables.get(self.current_table) {
+            if let Ok(conn) = Connection::open(&self.db_path) {
+                if let Ok(rows) =
+                    get_preview_rows(&conn, &table.name, &table.columns, offset, PREVIEW_WINDOW)
+                {
                     self.preview_rows = rows;
+                    self.window_offset = offset;
                 }
             }
         }
+    }
+
+    /// Ensure the loaded window covers `[scroll, scroll+height)`, reloading with
+    /// headroom if the viewport has moved outside it.
+    fn ensure_window(&mut self, height: usize) {
+        let need_end = self.scroll + height;
+        let win_end = self.window_offset + self.preview_rows.len();
+        let covered = self.scroll >= self.window_offset
+            && (need_end <= win_end || win_end >= self.table_row_count());
+        if !covered {
+            let offset = self.scroll.saturating_sub(PREVIEW_WINDOW / 4);
+            self.load_window(offset);
+        }
+    }
+
+    /// Fetch specific rows on demand (for yank of rows outside the window).
+    fn fetch_rows(&self, offset: usize, limit: usize) -> Vec<Vec<String>> {
+        if let Some(table) = self.tables.get(self.current_table) {
+            if let Ok(conn) = Connection::open(&self.db_path) {
+                if let Ok(rows) =
+                    get_preview_rows(&conn, &table.name, &table.columns, offset, limit)
+                {
+                    return rows;
+                }
+            }
+        }
+        Vec::new()
     }
 
     pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
@@ -215,7 +267,6 @@ impl SqliteEngine {
             return;
         }
 
-        let table = &self.tables[self.current_table];
         let height = area.height.saturating_sub(2) as usize;
 
         if self.selection < self.scroll {
@@ -223,7 +274,12 @@ impl SqliteEngine {
         } else if self.selection >= self.scroll + height {
             self.scroll = self.selection.saturating_sub(height.saturating_sub(1));
         }
+        // Load the window covering the viewport before reading rows from it.
+        self.ensure_window(height);
+        let window_offset = self.window_offset;
+        let total = self.table_row_count();
 
+        let table = &self.tables[self.current_table];
         let header_style = Style::default().fg(Color::Black).bg(Color::LightBlue).bold();
         let headers: Vec<Cell> = table.columns
             .iter()
@@ -231,13 +287,13 @@ impl SqliteEngine {
             .collect();
         let header = Row::new(headers);
 
-        let rows: Vec<Row> = self.preview_rows
-            .iter()
-            .skip(self.scroll)
-            .take(height)
-            .enumerate()
-            .map(|(idx, row)| {
-                let abs_row = self.scroll + idx;
+        let rows: Vec<Row> = (0..height)
+            .filter_map(|i| {
+                let abs_row = self.scroll + i;
+                if abs_row >= total {
+                    return None;
+                }
+                let row = self.preview_rows.get(abs_row.checked_sub(window_offset)?)?;
                 let in_visual = self.visual_range.map_or(false, |(start, end)| {
                     let (lo, hi) = if start <= end { (start, end) } else { (end, start) };
                     abs_row >= lo && abs_row <= hi
@@ -263,7 +319,7 @@ impl SqliteEngine {
                 if in_visual {
                     table_row = table_row.style(Style::default().bg(Color::LightYellow).fg(Color::Black));
                 }
-                table_row
+                Some(table_row)
             })
             .collect();
 
@@ -305,7 +361,7 @@ impl SqliteEngine {
             ViewMode::Schema => {
                 self.tables.iter().map(|t| t.columns.len() + 2).sum::<usize>()
             }
-            ViewMode::Preview => self.preview_rows.len(),
+            ViewMode::Preview => self.table_row_count(),
         };
 
         match key.code {
@@ -441,8 +497,8 @@ impl SqliteEngine {
                 None
             }
             ViewMode::Preview => self
-                .preview_rows
-                .get(self.selection)
+                .fetch_rows(self.selection, 1)
+                .first()
                 .map(|row| row.join("\t")),
         }
     }
@@ -471,7 +527,7 @@ impl SqliteEngine {
                         None
                     }
                     ViewMode::Preview => {
-                        self.preview_rows.get(idx).map(|row| row.join("\t"))
+                        self.fetch_rows(idx, 1).first().map(|row| row.join("\t"))
                     }
                 }
             })
@@ -488,8 +544,8 @@ impl SqliteEngine {
         match self.view_mode {
             ViewMode::Schema => self.tables.iter().map(|t| t.columns.len() + 2).sum(),
             // Data rows only; the column header is a sticky, non-selectable row,
-            // matching `selection`'s 0..preview_rows.len() range.
-            ViewMode::Preview => self.preview_rows.len(),
+            // Selection ranges over the whole table; rows are windowed in.
+            ViewMode::Preview => self.table_row_count(),
         }
     }
 
@@ -524,26 +580,27 @@ impl SqliteEngine {
         let matcher = crate::search::Matcher::new(query);
         self.last_match = Some(query.to_string());
 
-        // In Preview mode, search row values first and move the selection.
-        if matches!(self.view_mode, ViewMode::Preview) && !self.preview_rows.is_empty() {
-            let total = self.preview_rows.len();
-            let start = if forward {
-                (self.selection + 1) % total
-            } else {
-                (self.selection + total - 1) % total
-            };
-            for offset in 0..total {
-                let idx = if forward {
-                    (start + offset) % total
+        // In Preview mode, search row values across the whole table (capped).
+        if matches!(self.view_mode, ViewMode::Preview) {
+            const SEARCH_CAP: usize = 200_000;
+            let scan = self.table_row_count().min(SEARCH_CAP);
+            if scan > 0 {
+                let rows = self.fetch_rows(0, scan);
+                let start = if forward {
+                    (self.selection + 1) % scan
                 } else {
-                    (start + total - offset) % total
+                    (self.selection + scan - 1) % scan
                 };
-                if self.preview_rows[idx]
-                    .iter()
-                    .any(|v| matcher.is_match(&v))
-                {
-                    self.selection = idx;
-                    return;
+                for offset in 0..scan {
+                    let idx = if forward {
+                        (start + offset) % scan
+                    } else {
+                        (start + scan - offset) % scan
+                    };
+                    if rows.get(idx).map_or(false, |row| row.iter().any(|v| matcher.is_match(v))) {
+                        self.selection = idx;
+                        return;
+                    }
                 }
             }
         }
@@ -620,12 +677,20 @@ fn get_table_info(conn: &Connection) -> Result<Vec<TableInfo>> {
     Ok(tables)
 }
 
-fn get_preview_rows(conn: &Connection, table_name: &str, columns: &[ColumnInfo]) -> Result<Vec<Vec<String>>> {
+fn get_preview_rows(
+    conn: &Connection,
+    table_name: &str,
+    columns: &[ColumnInfo],
+    offset: usize,
+    limit: usize,
+) -> Result<Vec<Vec<String>>> {
     let col_names: Vec<&str> = columns.iter().map(|c| c.name.as_str()).collect();
     let query = format!(
-        "SELECT {} FROM \"{}\" LIMIT 100",
+        "SELECT {} FROM \"{}\" LIMIT {} OFFSET {}",
         col_names.iter().map(|c| format!("\"{}\"", c)).collect::<Vec<_>>().join(", "),
-        table_name
+        table_name,
+        limit,
+        offset,
     );
 
     let mut stmt = conn.prepare(&query)?;
@@ -659,6 +724,31 @@ fn page_jump(view_height: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn windowed_paging_reaches_last_row() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let f = tempfile::Builder::new().suffix(".db").tempfile().unwrap();
+        {
+            let conn = Connection::open(f.path()).unwrap();
+            conn.execute("CREATE TABLE t (id INTEGER, v TEXT)", []).unwrap();
+            let tx = conn.unchecked_transaction().unwrap();
+            for i in 1..=5000 {
+                tx.execute("INSERT INTO t VALUES (?1, ?2)", rusqlite::params![i, format!("row{}", i)]).unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let mut e = SqliteEngine::from_path(f.path()).unwrap();
+        // s toggles Schema -> Preview
+        e.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+        // content_height reflects the full row count, not a 100-row cap
+        assert_eq!(e.content_height(), 5000);
+        // G jumps to the last row; get_selected_line fetches it by offset
+        e.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::NONE));
+        assert_eq!(e.selection, 4999);
+        let last = e.get_selected_line().unwrap();
+        assert!(last.contains("row5000"), "got: {last}");
+    }
+
     use super::*;
 
     #[test]
