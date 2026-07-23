@@ -487,12 +487,11 @@ impl EngineState {
         matches!(self, EngineState::Image(_))
     }
 
-    /// Called once when the interactive TUI starts (terminal is set up). Lets an
-    /// engine do terminal-dependent setup — currently detecting the graphics
-    /// protocol and decoding an image for inline rendering.
-    pub fn prepare_tui(&mut self) {
+    /// Provide the detected terminal graphics picker so an image engine can
+    /// decode itself for inline rendering. No-op for non-image engines.
+    pub fn set_graphics(&mut self, picker: &ratatui_image::picker::Picker) {
         if let EngineState::Image(engine) = self {
-            engine.prepare_tui();
+            engine.set_graphics(picker);
         }
     }
 

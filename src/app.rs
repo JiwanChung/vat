@@ -68,6 +68,9 @@ pub struct App {
     /// served by the owning process). `None` if the platform clipboard is
     /// unavailable.
     clipboard: Option<Clipboard>,
+    /// Terminal graphics picker, detected once before entering the TUI. Shared
+    /// with image engines (including files switched to) for inline rendering.
+    graphics_picker: Option<ratatui_image::picker::Picker>,
 }
 
 impl App {
@@ -110,6 +113,7 @@ impl App {
             search_match_count: None,
             use_color,
             line_range,
+            graphics_picker: None,
         }
     }
 
@@ -128,7 +132,9 @@ impl App {
         let (display, source) = self.files[next].clone();
         match crate::analyzer::analyze(&source) {
             Ok(mut engine) => {
-                engine.prepare_tui();
+                if let Some(picker) = self.graphics_picker.as_ref() {
+                    engine.set_graphics(picker);
+                }
                 self.engine = engine;
                 self.current_file = next;
                 self.file_path = display;
@@ -302,6 +308,14 @@ impl App {
     }
 
     fn run_tui(&mut self) -> Result<()> {
+        // Detect the terminal graphics protocol BEFORE raw mode / the alternate
+        // screen — the query protocol must run on the normal screen. Then hand
+        // it to the current engine (an image decodes itself for inline render).
+        self.graphics_picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+        if let Some(picker) = self.graphics_picker.as_ref() {
+            self.engine.set_graphics(picker);
+        }
+
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen)?;
@@ -318,8 +332,6 @@ impl App {
 
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
-        // Terminal is interactive now: let the engine set up graphics (images).
-        self.engine.prepare_tui();
         let res = self.run_loop(&mut terminal);
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;

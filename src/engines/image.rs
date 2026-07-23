@@ -45,6 +45,8 @@ pub struct ImageEngine {
     /// Kitty/iTerm2/Sixel/half-blocks render state, once the terminal graphics
     /// protocol has been detected and the image decoded. `None` = metadata view.
     protocol: Option<StatefulProtocol>,
+    /// Detected protocol name, shown in the caption (e.g. "kitty").
+    graphics_kind: Option<String>,
     graphics_tried: bool,
     /// Visual selection range (start, end) for highlighting
     pub visual_range: Option<(usize, usize)>,
@@ -108,16 +110,16 @@ impl ImageEngine {
             pending_g: false,
             last_view_height: 0,
             protocol: None,
+            graphics_kind: None,
             graphics_tried: false,
             visual_range: None,
         })
     }
 
-    /// Detect the terminal's graphics protocol and, if available, decode the
-    /// image for inline rendering. Called once when the TUI starts (the terminal
-    /// must be interactive for detection). Falls back silently to the metadata
-    /// view when there is no graphics support or the image is too large.
-    pub fn prepare_tui(&mut self) {
+    /// Decode the image for inline rendering using the already-detected terminal
+    /// graphics `picker`. Called once when the image becomes visible. Falls back
+    /// to the metadata view when the image is too large or fails to decode.
+    pub fn set_graphics(&mut self, picker: &Picker) {
         if self.graphics_tried {
             return;
         }
@@ -135,17 +137,11 @@ impl ImageEngine {
             return;
         }
 
-        // Query the terminal for its graphics protocol + font size (with a
-        // timeout). Fails on terminals without graphics support -> metadata view.
-        let picker = match Picker::from_query_stdio() {
-            Ok(p) => p,
-            Err(_) => return,
-        };
-
         let img = match image::open(&self.file_path) {
             Ok(i) => i,
             Err(_) => return,
         };
+        self.graphics_kind = Some(format!("{:?}", picker.protocol_type()).to_lowercase());
         self.protocol = Some(picker.new_resize_protocol(img));
     }
 
@@ -157,12 +153,13 @@ impl ImageEngine {
         // caption below.
         if self.protocol.is_some() && area.height > 2 {
             let caption = format!(
-                "{}  {}x{}  {}  {}",
+                "{}  {}x{}  {}  {}  [{}]",
                 self.file_name,
                 self.info.width,
                 self.info.height,
                 self.info.format,
                 format_size(self.info.file_size),
+                self.graphics_kind.as_deref().unwrap_or("?"),
             );
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
