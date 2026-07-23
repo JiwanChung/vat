@@ -129,7 +129,7 @@ cargo install --path .
 ### Binary & Media
 | Format | Extensions | Features |
 |--------|------------|----------|
-| Images | `.jpg`, `.png`, `.gif`, `.webp` | Dimensions, color type, metadata (header-only) |
+| Images | `.jpg`, `.png`, `.gif`, `.webp` | Inline rendering via kitty/iTerm2/sixel graphics (half-blocks/metadata fallback) |
 | Binary | (auto-detected) | Hex viewer with ASCII column and `/` search (`0x..` or text) |
 | Log files | `.log` | Timestamp parsing, level filtering |
 
