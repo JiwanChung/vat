@@ -122,7 +122,7 @@ impl LockEngine {
         let table = Table::new(rows, widths)
             .header(header)
             .block(Block::default().borders(Borders::NONE))
-            .highlight_style(Style::default().bg(Color::LightBlue).fg(Color::Black));
+            .row_highlight_style(Style::default().bg(Color::LightBlue).fg(Color::Black));
 
         let mut state = TableState::default();
         if !slice.is_empty() {

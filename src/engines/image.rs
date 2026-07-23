@@ -9,7 +9,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::StatefulProtocol;
-use ratatui_image::StatefulImage;
+use ratatui_image::{Resize, StatefulImage};
 
 /// Above this many pixels we do not decode the full raster for inline rendering
 /// (protects against decompression bombs); the metadata view is shown instead.
@@ -44,7 +44,7 @@ pub struct ImageEngine {
     last_view_height: usize,
     /// Kitty/iTerm2/Sixel/half-blocks render state, once the terminal graphics
     /// protocol has been detected and the image decoded. `None` = metadata view.
-    protocol: Option<Box<dyn StatefulProtocol>>,
+    protocol: Option<StatefulProtocol>,
     graphics_tried: bool,
     /// Visual selection range (start, end) for highlighting
     pub visual_range: Option<(usize, usize)>,
@@ -135,13 +135,12 @@ impl ImageEngine {
             return;
         }
 
-        // Font size via termios ioctl + protocol guess via env ($TERM,
-        // $KITTY_WINDOW_ID, $TERM_PROGRAM, ...). No stdin round-trip.
-        let mut picker = match Picker::from_termios() {
+        // Query the terminal for its graphics protocol + font size (with a
+        // timeout). Fails on terminals without graphics support -> metadata view.
+        let picker = match Picker::from_query_stdio() {
             Ok(p) => p,
-            Err(_) => return, // no pixel geometry -> keep the metadata view
+            Err(_) => return,
         };
-        picker.guess_protocol();
 
         let img = match image::open(&self.file_path) {
             Ok(i) => i,
@@ -170,7 +169,8 @@ impl ImageEngine {
                 .constraints([Constraint::Min(1), Constraint::Length(1)])
                 .split(area);
             if let Some(protocol) = self.protocol.as_mut() {
-                frame.render_stateful_widget(StatefulImage::new(None), chunks[0], protocol);
+                let widget = StatefulImage::default().resize(Resize::Fit(None));
+                frame.render_stateful_widget(widget, chunks[0], protocol);
             }
             frame.render_widget(
                 Paragraph::new(Line::from(Span::styled(

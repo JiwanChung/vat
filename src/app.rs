@@ -534,8 +534,8 @@ impl App {
         let outer = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(ratatui::style::Color::LightBlue));
-        let area = outer.inner(frame.size());
-        frame.render_widget(outer, frame.size());
+        let area = outer.inner(frame.area());
+        frame.render_widget(outer, frame.area());
 
         let footer_height = if self.input.active { 2 } else { 1 };
         let chunks = Layout::default()
@@ -737,7 +737,7 @@ impl App {
             .border_style(Style::default().fg(ratatui::style::Color::LightCyan))
             .style(Style::default().bg(ratatui::style::Color::Black));
 
-        let area = frame.size();
+        let area = frame.area();
         let width = 50.min(area.width.saturating_sub(4));
         let height = (help_text.len() as u16 + 2).min(area.height.saturating_sub(4));
         let x = (area.width.saturating_sub(width)) / 2;
