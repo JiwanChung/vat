@@ -481,6 +481,21 @@ impl EngineState {
         }
     }
 
+    /// Whether this engine should always use the interactive TUI (not the plain
+    /// one-shot path) — images need the TUI to render inline graphics.
+    pub fn prefers_tui(&self) -> bool {
+        matches!(self, EngineState::Image(_))
+    }
+
+    /// Called once when the interactive TUI starts (terminal is set up). Lets an
+    /// engine do terminal-dependent setup — currently detecting the graphics
+    /// protocol and decoding an image for inline rendering.
+    pub fn prepare_tui(&mut self) {
+        if let EngineState::Image(engine) = self {
+            engine.prepare_tui();
+        }
+    }
+
     /// Number of lines/rows/entries matching `query`, when the engine can count
     /// cheaply. `None` for engines where a total is not meaningful.
     pub fn match_count(&mut self, query: &str) -> Option<usize> {

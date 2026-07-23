@@ -1,12 +1,19 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use image::ImageDecoder;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui_image::picker::Picker;
+use ratatui_image::protocol::StatefulProtocol;
+use ratatui_image::StatefulImage;
+
+/// Above this many pixels we do not decode the full raster for inline rendering
+/// (protects against decompression bombs); the metadata view is shown instead.
+const MAX_RENDER_PIXELS: u64 = 100_000_000;
 
 #[derive(Clone)]
 struct ImageInfo {
@@ -31,9 +38,14 @@ pub struct ImageEngine {
     selection: usize,
     scroll: usize,
     file_name: String,
+    file_path: PathBuf,
     last_query: Option<String>,
     pending_g: bool,
     last_view_height: usize,
+    /// Kitty/iTerm2/Sixel/half-blocks render state, once the terminal graphics
+    /// protocol has been detected and the image decoded. `None` = metadata view.
+    protocol: Option<Box<dyn StatefulProtocol>>,
+    graphics_tried: bool,
     /// Visual selection range (start, end) for highlighting
     pub visual_range: Option<(usize, usize)>,
 }
@@ -91,16 +103,84 @@ impl ImageEngine {
             selection: 0,
             scroll: 0,
             file_name,
+            file_path: path.to_path_buf(),
             last_query: None,
             pending_g: false,
             last_view_height: 0,
+            protocol: None,
+            graphics_tried: false,
             visual_range: None,
         })
+    }
+
+    /// Detect the terminal's graphics protocol and, if available, decode the
+    /// image for inline rendering. Called once when the TUI starts (the terminal
+    /// must be interactive for detection). Falls back silently to the metadata
+    /// view when there is no graphics support or the image is too large.
+    pub fn prepare_tui(&mut self) {
+        if self.graphics_tried {
+            return;
+        }
+        self.graphics_tried = true;
+
+        let pixels = self.info.width as u64 * self.info.height as u64;
+        if pixels > MAX_RENDER_PIXELS {
+            self.lines.insert(
+                0,
+                InfoLine {
+                    label: "Render".to_string(),
+                    value: "image too large to render inline".to_string(),
+                },
+            );
+            return;
+        }
+
+        // Font size via termios ioctl + protocol guess via env ($TERM,
+        // $KITTY_WINDOW_ID, $TERM_PROGRAM, ...). No stdin round-trip.
+        let mut picker = match Picker::from_termios() {
+            Ok(p) => p,
+            Err(_) => return, // no pixel geometry -> keep the metadata view
+        };
+        picker.guess_protocol();
+
+        let img = match image::open(&self.file_path) {
+            Ok(i) => i,
+            Err(_) => return,
+        };
+        self.protocol = Some(picker.new_resize_protocol(img));
     }
 
     pub fn render(&mut self, frame: &mut ratatui::Frame, area: Rect, wrap: bool) {
         let height = area.height as usize;
         self.last_view_height = height;
+
+        // Inline image rendering (kitty/iTerm2/sixel/half-blocks), with a compact
+        // caption below.
+        if self.protocol.is_some() && area.height > 2 {
+            let caption = format!(
+                "{}  {}x{}  {}  {}",
+                self.file_name,
+                self.info.width,
+                self.info.height,
+                self.info.format,
+                format_size(self.info.file_size),
+            );
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(area);
+            if let Some(protocol) = self.protocol.as_mut() {
+                frame.render_stateful_widget(StatefulImage::new(None), chunks[0], protocol);
+            }
+            frame.render_widget(
+                Paragraph::new(Line::from(Span::styled(
+                    caption,
+                    Style::default().fg(Color::LightCyan),
+                ))),
+                chunks[1],
+            );
+            return;
+        }
 
         if self.selection < self.scroll {
             self.scroll = self.selection;

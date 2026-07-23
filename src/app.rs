@@ -127,7 +127,8 @@ impl App {
         };
         let (display, source) = self.files[next].clone();
         match crate::analyzer::analyze(&source) {
-            Ok(engine) => {
+            Ok(mut engine) => {
+                engine.prepare_tui();
                 self.engine = engine;
                 self.current_file = next;
                 self.file_path = display;
@@ -191,6 +192,11 @@ impl App {
             Paging::Always => return self.run_tui(),
             Paging::Never => return self.run_plain(cols),
             Paging::Auto => {}
+        }
+        // Images use the TUI so they can render inline graphics, even though
+        // their metadata would otherwise fit on one screen.
+        if self.engine.prefers_tui() {
+            return self.run_tui();
         }
         // Cheap lower-bound pre-check: content_height counts unwrapped lines, so
         // if it already exceeds the screen the file cannot fit — page without
@@ -312,6 +318,8 @@ impl App {
 
         let backend = CrosstermBackend::new(stdout);
         let mut terminal = Terminal::new(backend)?;
+        // Terminal is interactive now: let the engine set up graphics (images).
+        self.engine.prepare_tui();
         let res = self.run_loop(&mut terminal);
         disable_raw_mode()?;
         execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
