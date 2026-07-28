@@ -311,7 +311,13 @@ impl App {
         // Detect the terminal graphics protocol BEFORE raw mode / the alternate
         // screen — the query protocol must run on the normal screen. Then hand
         // it to the current engine (an image decodes itself for inline render).
-        self.graphics_picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+        let mut picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+        if let (Some(p), Some(proto)) = (picker.as_mut(), forced_image_protocol()) {
+            // Auto-detection mis-picks sixel on some kitty-protocol terminals
+            // (e.g. Ghostty); honor an explicit override / known terminal.
+            p.set_protocol_type(proto);
+        }
+        self.graphics_picker = picker;
         if let Some(picker) = self.graphics_picker.as_ref() {
             self.engine.set_graphics(picker);
         }
@@ -783,6 +789,31 @@ impl App {
             Style::default().fg(ratatui::style::Color::LightBlue),
         ));
         vec![header_line, rule_line]
+    }
+}
+
+/// An explicit image-protocol override, if the environment calls for one.
+/// `VAT_IMAGE_PROTOCOL=kitty|iterm2|sixel|halfblocks` forces a protocol; failing
+/// that, Ghostty is forced to kitty (auto-detection tends to mis-pick sixel,
+/// which Ghostty does not render).
+fn forced_image_protocol() -> Option<ratatui_image::picker::ProtocolType> {
+    use ratatui_image::picker::ProtocolType;
+    if let Ok(val) = std::env::var("VAT_IMAGE_PROTOCOL") {
+        return match val.to_lowercase().as_str() {
+            "kitty" => Some(ProtocolType::Kitty),
+            "iterm2" => Some(ProtocolType::Iterm2),
+            "sixel" => Some(ProtocolType::Sixel),
+            "halfblocks" => Some(ProtocolType::Halfblocks),
+            _ => None,
+        };
+    }
+    let is_ghostty = std::env::var("TERM_PROGRAM").as_deref() == Ok("ghostty")
+        || std::env::var("TERM").as_deref() == Ok("xterm-ghostty")
+        || std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some();
+    if is_ghostty {
+        Some(ProtocolType::Kitty)
+    } else {
+        None
     }
 }
 
