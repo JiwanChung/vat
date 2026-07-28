@@ -807,6 +807,14 @@ fn forced_image_protocol() -> Option<ratatui_image::picker::ProtocolType> {
             _ => None,
         };
     }
+    // Terminal multiplexers usually strip graphics protocols (kitty/sixel/iTerm2)
+    // but pass plain colored text, so half-blocks is the only thing that renders.
+    let in_multiplexer = std::env::var_os("ZELLIJ").is_some()
+        || std::env::var_os("TMUX").is_some()
+        || std::env::var_os("STY").is_some();
+    if in_multiplexer {
+        return Some(ProtocolType::Halfblocks);
+    }
     let is_ghostty = std::env::var("TERM_PROGRAM").as_deref() == Ok("ghostty")
         || std::env::var("TERM").as_deref() == Ok("xterm-ghostty")
         || std::env::var_os("GHOSTTY_RESOURCES_DIR").is_some();
