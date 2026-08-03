@@ -1,6 +1,6 @@
 [package]
 name = "vat-viewer"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A semantic file viewer that renders files in the most intuitive terminal view"
 repository = "https://github.com/JiwanChung/vat"
