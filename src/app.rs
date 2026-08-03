@@ -1215,19 +1215,20 @@ mod tests {
     #[test]
     fn run_editor_launches_and_reloads() {
         use std::io::Write;
-        use std::os::unix::fs::PermissionsExt;
-        // A temp editor script that appends a line to the file it is given.
-        let mut ed = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
-        writeln!(ed, "#!/bin/sh").unwrap();
-        writeln!(ed, "printf 'line 3\\n' >> \"$1\"").unwrap();
-        ed.flush().unwrap();
-        std::fs::set_permissions(ed.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let ed_path = ed.path().to_str().unwrap().to_string();
+        // A source file with 3 lines. We use `cp SRC` as the "editor": run_editor
+        // appends the current file path as the last arg, so it copies SRC over the
+        // current file. This avoids needing an executable temp script (CI temp
+        // dirs are often noexec) while still exercising launch + reload.
+        let mut src = tempfile::Builder::new().suffix(".txt").tempfile().unwrap();
+        writeln!(src, "one").unwrap();
+        writeln!(src, "two").unwrap();
+        writeln!(src, "three").unwrap();
+        src.flush().unwrap();
 
         let mut app = app_with_lines(2); // file with "line 1", "line 2"
         assert_eq!(app.engine.content_height(), 2);
-        app.run_editor(&ed_path);
-        // The editor appended a line and the engine was reloaded to reflect it.
+        app.run_editor(&format!("cp {}", src.path().display()));
+        // The current file now has SRC's 3 lines and the engine was reloaded.
         assert_eq!(app.engine.content_height(), 3);
         assert_eq!(app.status.as_deref(), Some("Reloaded after edit"));
     }
