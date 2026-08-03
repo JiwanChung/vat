@@ -809,6 +809,10 @@ fn forced_image_protocol() -> Option<ratatui_image::picker::ProtocolType> {
     }
     // Terminal multiplexers usually strip graphics protocols (kitty/sixel/iTerm2)
     // but pass plain colored text, so half-blocks is the only thing that renders.
+    // TODO(zellij): graphics passthrough was merged into zellij (issue #2814,
+    // ~2026-08) but isn't released yet. Once it ships, stop forcing half-blocks
+    // on $ZELLIJ and trust the capability query instead (fall back to half-blocks
+    // only when no graphics protocol is detected). Workaround: VAT_IMAGE_PROTOCOL.
     let in_multiplexer = std::env::var_os("ZELLIJ").is_some()
         || std::env::var_os("TMUX").is_some()
         || std::env::var_os("STY").is_some();
