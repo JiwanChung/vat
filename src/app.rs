@@ -71,6 +71,8 @@ pub struct App {
     /// Terminal graphics picker, detected once before entering the TUI. Shared
     /// with image engines (including files switched to) for inline rendering.
     graphics_picker: Option<ratatui_image::picker::Picker>,
+    /// Set by `e`; the run loop then suspends the TUI and opens `$EDITOR`.
+    pending_edit: bool,
 }
 
 impl App {
@@ -114,6 +116,7 @@ impl App {
             use_color,
             line_range,
             graphics_picker: None,
+            pending_edit: false,
         }
     }
 
@@ -309,17 +312,28 @@ impl App {
 
     fn run_tui(&mut self) -> Result<()> {
         // Detect the terminal graphics protocol BEFORE raw mode / the alternate
-        // screen — the query protocol must run on the normal screen. Then hand
+        // screen — the query protocol must run on the normal screen. Only for
+        // image files: the query round-trips with the terminal (and blocks up to
+        // ~2s if it doesn't answer), so we skip it for everything else. Then hand
         // it to the current engine (an image decodes itself for inline render).
-        let mut picker = ratatui_image::picker::Picker::from_query_stdio().ok();
-        if let (Some(p), Some(proto)) = (picker.as_mut(), forced_image_protocol()) {
-            // Auto-detection mis-picks sixel on some kitty-protocol terminals
-            // (e.g. Ghostty); honor an explicit override / known terminal.
-            p.set_protocol_type(proto);
-        }
-        self.graphics_picker = picker;
-        if let Some(picker) = self.graphics_picker.as_ref() {
-            self.engine.set_graphics(picker);
+        let has_image = self.engine.prefers_tui()
+            || self.files.iter().any(|(_, p)| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref(),
+                    Some("png" | "jpg" | "jpeg" | "gif" | "webp")
+                )
+            });
+        if has_image {
+            let mut picker = ratatui_image::picker::Picker::from_query_stdio().ok();
+            if let (Some(p), Some(proto)) = (picker.as_mut(), forced_image_protocol()) {
+                // Auto-detection mis-picks sixel on some kitty-protocol terminals
+                // (e.g. Ghostty); honor an explicit override / known terminal.
+                p.set_protocol_type(proto);
+            }
+            self.graphics_picker = picker;
+            if let Some(picker) = self.graphics_picker.as_ref() {
+                self.engine.set_graphics(picker);
+            }
         }
 
         enable_raw_mode()?;
@@ -353,11 +367,79 @@ impl App {
                     self.handle_key(key);
                 }
             }
+            if self.pending_edit {
+                self.pending_edit = false;
+                self.edit_in_editor(terminal)?;
+            }
             if self.should_quit {
                 break;
             }
         }
         Ok(())
+    }
+
+    /// Suspend the TUI, open the current file in `$VISUAL`/`$EDITOR`, then resume
+    /// and reload the file so edits are reflected. No-op for non-file sources.
+    fn edit_in_editor(
+        &mut self,
+        terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    ) -> Result<()> {
+        let editor = std::env::var("VISUAL")
+            .ok()
+            .filter(|e| !e.trim().is_empty())
+            .or_else(|| std::env::var("EDITOR").ok().filter(|e| !e.trim().is_empty()));
+        let editor = match editor {
+            Some(e) => e,
+            None => {
+                self.status = Some("Set $EDITOR (or $VISUAL) to edit".to_string());
+                return Ok(());
+            }
+        };
+        if !self.source_path.is_file() {
+            self.status = Some("Not an editable file".to_string());
+            return Ok(());
+        }
+
+        // Suspend the TUI, run the editor, then resume and reload.
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+
+        self.run_editor(&editor);
+
+        enable_raw_mode()?;
+        execute!(terminal.backend_mut(), EnterAlternateScreen)?;
+        terminal.clear()?;
+        Ok(())
+    }
+
+    /// Launch `editor` on the current file and reload the engine. Terminal-free
+    /// (the caller suspends/resumes the TUI around it) so it is unit-testable.
+    fn run_editor(&mut self, editor: &str) {
+        // `$EDITOR` may include args (e.g. "code --wait"); the file goes last.
+        let mut parts = editor.split_whitespace();
+        let program = parts.next().unwrap_or("vi");
+        let result = std::process::Command::new(program)
+            .args(parts)
+            .arg(&self.source_path)
+            .status();
+
+        match result {
+            Ok(_) => {
+                // Reload so edits show; keep the graphics picker for images.
+                match crate::analyzer::analyze(&self.source_path) {
+                    Ok(mut engine) => {
+                        if let Some(picker) = self.graphics_picker.as_ref() {
+                            engine.set_graphics(picker);
+                        }
+                        self.engine = engine;
+                        self.status = Some("Reloaded after edit".to_string());
+                    }
+                    Err(e) => self.status = Some(format!("Reload failed: {}", e)),
+                }
+            }
+            Err(e) => self.status = Some(format!("Could not launch editor: {}", e)),
+        }
     }
 
     fn handle_key(&mut self, key: KeyEvent) {
@@ -536,6 +618,7 @@ impl App {
             }
             KeyCode::Char(']') => self.switch_file(true),
             KeyCode::Char('[') => self.switch_file(false),
+            KeyCode::Char('e') => self.pending_edit = true,
             KeyCode::Char('F') => {
                 // Clear filter
                 self.filter = None;
@@ -738,7 +821,7 @@ impl App {
             Line::from("  v            Enter visual line mode"),
             Line::from("  s            Toggle sidebar/schema"),
             Line::from("  w            Toggle line wrap"),
-            Line::from("  e            Next section/heading"),
+            Line::from("  e            Edit current file in $EDITOR"),
             Line::from(""),
             Line::from(vec![
                 Span::styled("General", Style::default().bold()),
@@ -1127,6 +1210,34 @@ mod tests {
         assert_eq!(app.search_match_count, Some(1));
         // Incremental: selection jumped to the match (line 100 -> index 99).
         assert_eq!(app.engine.selection(), 99);
+    }
+
+    #[test]
+    fn run_editor_launches_and_reloads() {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+        // A temp editor script that appends a line to the file it is given.
+        let mut ed = tempfile::Builder::new().suffix(".sh").tempfile().unwrap();
+        writeln!(ed, "#!/bin/sh").unwrap();
+        writeln!(ed, "printf 'line 3\\n' >> \"$1\"").unwrap();
+        ed.flush().unwrap();
+        std::fs::set_permissions(ed.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let ed_path = ed.path().to_str().unwrap().to_string();
+
+        let mut app = app_with_lines(2); // file with "line 1", "line 2"
+        assert_eq!(app.engine.content_height(), 2);
+        app.run_editor(&ed_path);
+        // The editor appended a line and the engine was reloaded to reflect it.
+        assert_eq!(app.engine.content_height(), 3);
+        assert_eq!(app.status.as_deref(), Some("Reloaded after edit"));
+    }
+
+    #[test]
+    fn e_key_requests_edit() {
+        let mut app = app_with_lines(3);
+        assert!(!app.pending_edit);
+        app.handle_key(key('e'));
+        assert!(app.pending_edit, "`e` should request an edit");
     }
 
     #[test]
